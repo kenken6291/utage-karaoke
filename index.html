@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2A0E22">
   <!-- 画面のバージョン：更新したら content と下の ?v= をそろえて上げる -->
-  <meta name="app-version" content="1.3.0" data-updated="2026-10-09">
+  <meta name="app-version" content="1.3.1" data-updated="2026-10-09">
   <title>UTAGE — YouTubeカラオケ</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.3.0">
+  <link rel="stylesheet" href="style.css?v=1.3.1">
 </head>
 <body>
 
@@ -185,7 +185,11 @@
           <p id="navi-bubble" class="navi-bubble" aria-live="polite"></p>
           <p id="navi-status" class="navi-status"></p>
         </div>
+        <button id="btn-navi-hide" class="navi-close" aria-label="ナビの表示を消す" title="ナビの表示を消す">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+        </button>
       </div>
+      <button id="btn-navi-show" class="navi-show" hidden>💬 ナビを表示する</button>
 
       <div id="score-card" class="score-card" hidden>
         <div class="score-head">
@@ -448,8 +452,8 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 
-<script src="config.js?v=1.3.0"></script>
-<script src="app.js?v=1.3.0"></script>
+<script src="config.js?v=1.3.1"></script>
+<script src="app.js?v=1.3.1"></script>
 <script src="https://www.youtube.com/iframe_api"></script>
 </body>
 </html>

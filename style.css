@@ -312,6 +312,36 @@ input[type="range"] { accent-color: var(--amber); height: 28px; }
   background: linear-gradient(180deg, rgba(85, 32, 74, .55), rgba(58, 21, 48, .55));
   border: 1px solid rgba(246, 234, 219, 0.08);
 }
+.navi { position: relative; padding-right: 52px; }
+.navi-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mute);
+  cursor: pointer;
+}
+.navi-close svg { width: 20px; height: 20px; }
+.navi-close:hover { color: var(--cream); background: rgba(246, 234, 219, .08); }
+.navi-show {
+  margin-top: 12px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 99px;
+  border: 1px dashed var(--velvet-3);
+  background: transparent;
+  color: var(--mute);
+  font-weight: 700;
+  cursor: pointer;
+}
+.navi-show:hover { color: var(--cream); border-color: var(--mute); }
+.navi-show.is-speaking { color: var(--amber); border-color: var(--amber); }
 .navi-avatar {
   flex: 0 0 auto;
   width: 60px;

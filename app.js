@@ -77,6 +77,7 @@ const state = {
   resultMode: 'none',  // 'youtube' | 'ai'
   aiCondition: '',
   dictating: false,
+  naviHidden: false,
   dictRecog: null,
   suggestions: [],
   song: null,          // {videoId,title,artist,keyShift,memo,favId}
@@ -223,6 +224,7 @@ function savePrefs() {
   prefsTimer = setTimeout(() => {
     localStorage.setItem(CONFIG.PREF_KEY, JSON.stringify({
       ttsMode: state.ttsMode, musicVol: state.musicVol, preset: state.preset, fx: MicFx.p,
+      naviHidden: state.naviHidden,
       goEra: $('#sel-go-era')?.value || '', goVocal: $('#sel-go-vocal')?.value || '',
     }));
   }, 300);
@@ -658,6 +660,7 @@ const Voice = {
     this.speaking = true;
     showLine(text);
     $('#navi').classList.add('is-speaking');
+    $('#btn-navi-show').classList.add('is-speaking');
     duck(true);
     updateListening();
     try {
@@ -670,6 +673,7 @@ const Voice = {
       if (my === this.token) {
         this.speaking = false;
         $('#navi').classList.remove('is-speaking');
+        $('#btn-navi-show').classList.remove('is-speaking');
         duck(false);
         updateListening();
       }
@@ -731,6 +735,7 @@ const Voice = {
       this.token++;
       this.speaking = false;
       $('#navi')?.classList.remove('is-speaking');
+      $('#btn-navi-show')?.classList.remove('is-speaking');
       duck(false);
     }
   },
@@ -745,6 +750,7 @@ function showLine(text) { $('#navi-bubble').textContent = text; }
 
 function telop(text, sec) {
   const el = $('#telop');
+  if (state.naviHidden) { el.hidden = true; return; } // ナビ非表示中は字幕も出さない
   el.innerHTML = '';
   const span = document.createElement('span');
   span.className = 'telop-text is-wipe';
@@ -755,6 +761,19 @@ function telop(text, sec) {
   el.hidden = false;
   clearTimeout(state.telopTimer);
   state.telopTimer = setTimeout(() => { el.hidden = true; }, (Math.max(1, sec) + 1.8) * 1000);
+}
+
+/** ナビ表示のON/OFF（声はそのまま。声を止めたい時はヘッダーの「声」で） */
+function applyNaviVisibility() {
+  $('#navi').hidden = state.naviHidden;
+  $('#btn-navi-show').hidden = !state.naviHidden;
+  if (state.naviHidden) $('#telop').hidden = true;
+}
+function setNaviHidden(hidden) {
+  state.naviHidden = hidden;
+  applyNaviVisibility();
+  savePrefs();
+  (hidden ? $('#btn-navi-show') : $('#btn-navi-hide')).focus();
 }
 
 function setNavi(busy, text = '') {
@@ -1890,6 +1909,8 @@ function bindApp() {
   });
 
   $('#btn-logout').addEventListener('click', logout);
+  $('#btn-navi-hide').addEventListener('click', () => setNaviHidden(true));
+  $('#btn-navi-show').addEventListener('click', () => setNaviHidden(false));
 
   // 最初の操作で AudioContext を起こしておく（自動再生制限対策）
   document.addEventListener('pointerdown', () => { AC.resume().catch(() => {}); }, { once: true });
@@ -1910,6 +1931,7 @@ async function init() {
   if (typeof prefs.musicVol === 'number') state.musicVol = prefs.musicVol;
   if (prefs.preset) state.preset = prefs.preset;
   if (prefs.fx) Object.assign(MicFx.p, prefs.fx);
+  state.naviHidden = !!prefs.naviHidden;
   if (prefs.goEra) $('#sel-go-era').value = prefs.goEra;
   if (prefs.goVocal) $('#sel-go-vocal').value = prefs.goVocal;
 
@@ -1917,6 +1939,7 @@ async function init() {
   bindAuth();
   bindApp();
   syncSliders();
+  applyNaviVisibility();
   renderMicUI();
   renderNow();
   pickJaVoice();
