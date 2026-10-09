@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2A0E22">
+  <!-- 画面のバージョン：更新したら content と下の ?v= をそろえて上げる -->
+  <meta name="app-version" content="1.1.0" data-updated="2026-10-09">
+  <title>UTAGE — YouTubeカラオケ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=1.1.0">
+</head>
+<body>
+
+<!-- ================= 認証 ================= -->
+<main id="auth" class="auth-wrap">
+  <div class="auth-card">
+    <h1 class="logo"><span class="telop-text is-wipe" data-text="UTAGE" style="--dur:1.6s">UTAGE</span></h1>
+    <p class="tagline">YouTubeで歌って、AIが盛り上げる。</p>
+
+    <section id="view-login" class="view">
+      <form id="form-login" class="space-y-4" novalidate>
+        <label class="field">メールアドレス
+          <input type="email" name="email" required autocomplete="email" inputmode="email">
+        </label>
+        <label class="field">パスワード
+          <span class="pw-wrap">
+            <input type="password" name="password" required autocomplete="current-password">
+            <button type="button" class="pw-toggle" aria-label="パスワードを表示"></button>
+          </span>
+        </label>
+        <button type="submit" class="btn btn-primary w-full">ログイン</button>
+      </form>
+      <div class="auth-links">
+        <button type="button" data-go="view-register">はじめての方（新規登録）</button>
+        <button type="button" data-go="view-forgot">パスワードを忘れた</button>
+      </div>
+    </section>
+
+    <section id="view-register" class="view" hidden>
+      <h2 class="view-title">新規登録</h2>
+      <p class="view-note">メールアドレスに仮パスワードを送ります。</p>
+      <form id="form-register" class="space-y-4" novalidate>
+        <label class="field">ニックネーム
+          <input type="text" name="nickname" required maxlength="20" autocomplete="nickname">
+        </label>
+        <label class="field">メールアドレス
+          <input type="email" name="email" required autocomplete="email" inputmode="email">
+        </label>
+        <button type="submit" class="btn btn-primary w-full">仮パスワードを受け取る</button>
+      </form>
+      <div class="auth-links"><button type="button" data-go="view-login">ログインに戻る</button></div>
+    </section>
+
+    <section id="view-forgot" class="view" hidden>
+      <h2 class="view-title">パスワードの再発行</h2>
+      <p class="view-note">登録したメールアドレスに新しい仮パスワードを送ります。</p>
+      <form id="form-forgot" class="space-y-4" novalidate>
+        <label class="field">メールアドレス
+          <input type="email" name="email" required autocomplete="email" inputmode="email">
+        </label>
+        <button type="submit" class="btn btn-primary w-full">仮パスワードを再発行</button>
+      </form>
+      <div class="auth-links"><button type="button" data-go="view-login">ログインに戻る</button></div>
+    </section>
+
+    <section id="view-reset" class="view" hidden>
+      <h2 class="view-title">新しいパスワードを設定</h2>
+      <p class="view-note">英字と数字を含む8文字以上で設定してください。</p>
+      <form id="form-reset" class="space-y-4" novalidate>
+        <label class="field">新しいパスワード
+          <span class="pw-wrap">
+            <input type="password" name="pw1" required minlength="8" autocomplete="new-password">
+            <button type="button" class="pw-toggle" aria-label="パスワードを表示"></button>
+          </span>
+        </label>
+        <label class="field">もう一度入力
+          <span class="pw-wrap">
+            <input type="password" name="pw2" required minlength="8" autocomplete="new-password">
+            <button type="button" class="pw-toggle" aria-label="パスワードを表示"></button>
+          </span>
+        </label>
+        <button type="submit" class="btn btn-primary w-full">パスワードを設定して始める</button>
+      </form>
+      <div class="auth-links"><button type="button" id="btn-reset-cancel">ログアウト</button></div>
+    </section>
+
+    <p class="version version-auth" data-version aria-live="polite"></p>
+  </div>
+</main>
+
+<!-- ================= アプリ本体 ================= -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="logo-sm">UTAGE</div>
+    <div class="topbar-controls">
+      <label class="mini-field">ナビ
+        <select id="sel-character">
+          <option value="mama">スナックのママ</option>
+          <option value="dj">熱血ライブDJ</option>
+          <option value="pro">辛口AIプロデューサー</option>
+        </select>
+      </label>
+      <label class="mini-field">声
+        <select id="sel-tts">
+          <option value="gemini">Gemini音声（高品質）</option>
+          <option value="browser">ブラウザ音声（すぐ話す）</option>
+        </select>
+      </label>
+      <span id="nick" class="nick"></span>
+      <button id="btn-logout" class="btn btn-sm btn-ghost">ログアウト</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- ステージ -->
+    <section class="stage" aria-label="プレイヤー">
+      <div class="screen">
+        <div id="yt-player"></div>
+        <div id="telop" class="telop" hidden aria-hidden="true"></div>
+        <div id="screen-empty" class="screen-empty">
+          <p>右の「曲さがし」から曲を選ぶと、ここで再生されます</p>
+        </div>
+      </div>
+
+      <div class="now">
+        <div class="now-main">
+          <p id="now-title" class="now-title">曲が選ばれていません</p>
+          <p id="now-artist" class="now-artist"></p>
+        </div>
+        <button id="btn-fav-now" class="btn btn-sm" disabled>マイリストに保存</button>
+      </div>
+
+      <div class="transport">
+        <div class="transport-buttons">
+          <button id="btn-restart" class="btn btn-icon" aria-label="頭から" title="頭から" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 5l-10 7 10 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          </button>
+          <button id="btn-back10" class="btn btn-icon" aria-label="10秒戻る" title="10秒戻る" disabled>
+            <span class="txt-icon">−10</span>
+          </button>
+          <button id="btn-play" class="btn btn-play" aria-label="再生" disabled>
+            <svg class="ico-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4l13 8-13 8z" fill="currentColor"/></svg>
+            <svg class="ico-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z" fill="currentColor"/></svg>
+          </button>
+          <button id="btn-intro" class="btn btn-primary btn-intro" disabled>曲紹介から歌う</button>
+        </div>
+        <div class="seekbar">
+          <span id="t-cur" class="t">0:00</span>
+          <input id="seek" type="range" min="0" max="1000" value="0" aria-label="再生位置" disabled>
+          <span id="t-dur" class="t">0:00</span>
+        </div>
+        <div class="sub-controls">
+          <div class="keybox" aria-label="キーメモ">
+            <span class="sub-label">キー</span>
+            <button id="key-down" class="btn btn-sm btn-key" aria-label="キーを下げる" disabled>♭</button>
+            <span id="now-key" class="key-value">原曲キー</span>
+            <button id="key-up" class="btn btn-sm btn-key" aria-label="キーを上げる" disabled>♯</button>
+          </div>
+          <label class="vol">
+            <span class="sub-label">曲の音量</span>
+            <input id="vol" type="range" min="0" max="100" value="80">
+          </label>
+        </div>
+        <p id="now-memo" class="now-memo" hidden></p>
+        <p class="hint">キーはYouTube側では変えられないため「歌うときの目安メモ」です。マイリスト登録曲は自動で保存されます。</p>
+      </div>
+
+      <div id="navi" class="navi" data-character="mama">
+        <div id="navi-avatar" class="navi-avatar" aria-hidden="true">💄</div>
+        <div class="navi-body">
+          <p id="navi-name" class="navi-name">スナックのママ・百合子</p>
+          <p id="navi-bubble" class="navi-bubble" aria-live="polite"></p>
+          <p id="navi-status" class="navi-status"></p>
+        </div>
+      </div>
+
+      <div id="score-card" class="score-card" hidden>
+        <div class="score-head">
+          <span id="score-num" class="score-num">--</span><span class="score-unit">点</span>
+        </div>
+        <p id="score-detail" class="score-detail"></p>
+        <p class="hint">声を出していた割合と声量の安定感による簡易採点です（音程は判定しません）。</p>
+      </div>
+    </section>
+
+    <!-- サイドパネル -->
+    <aside class="side">
+      <nav class="tabs" role="tablist" aria-label="メニュー">
+        <button class="tab" role="tab" data-tab="search" aria-selected="true">曲さがし</button>
+        <button class="tab" role="tab" data-tab="mylist" aria-selected="false">マイリスト</button>
+        <button class="tab" role="tab" data-tab="mic" aria-selected="false">マイク</button>
+        <button class="tab" role="tab" data-tab="outing" aria-selected="false">お出かけ</button>
+      </nav>
+
+      <!-- 曲さがし -->
+      <section id="panel-search" class="panel" role="tabpanel">
+        <form id="form-search" class="search-form">
+          <input name="q" type="search" placeholder="曲名・歌手名、またはYouTubeのURL" aria-label="検索ワード" autocomplete="off">
+          <button type="submit" class="btn btn-primary">検索</button>
+        </form>
+        <label class="check"><input id="chk-karaoke" type="checkbox" checked> 「カラオケ」を付けて検索する</label>
+        <ul id="search-results" class="song-list"></ul>
+      </section>
+
+      <!-- マイリスト -->
+      <section id="panel-mylist" class="panel" role="tabpanel" hidden>
+        <div class="list-head">
+          <div class="seg" role="group" aria-label="絞り込み">
+            <button class="seg-btn" data-filter="all" aria-pressed="true">すべて</button>
+            <button class="seg-btn" data-filter="ohako" aria-pressed="false">十八番</button>
+          </div>
+          <span id="fav-count" class="count"></span>
+        </div>
+        <ul id="fav-list" class="song-list"></ul>
+      </section>
+
+      <!-- マイク -->
+      <section id="panel-mic" class="panel" role="tabpanel" hidden>
+        <div class="mic-head">
+          <button id="btn-mic" class="btn btn-mic" aria-pressed="false">マイクをONにする</button>
+          <span id="mic-state" class="mic-state">OFF</span>
+        </div>
+        <canvas id="meter" class="meter" aria-label="マイク入力レベル"></canvas>
+
+        <div class="presets" role="group" aria-label="エコーのプリセット">
+          <button class="preset" data-preset="bath">お風呂場風</button>
+          <button class="preset" data-preset="room">本格カラオケルーム</button>
+          <button class="preset" data-preset="stadium">スタジアム</button>
+          <button class="preset" data-preset="off">オフ</button>
+        </div>
+
+        <div class="sliders">
+          <label class="slider">
+            <span class="slider-top"><span>マイク音量</span><output id="out-mic">100%</output></span>
+            <input id="sl-mic" type="range" min="0" max="1.5" step="0.01" value="1">
+          </label>
+          <label class="slider">
+            <span class="slider-top"><span>エコーの深さ</span><output id="out-fb">45%</output></span>
+            <input id="sl-fb" type="range" min="0" max="0.85" step="0.01" value="0.38">
+          </label>
+          <label class="slider">
+            <span class="slider-top"><span>ディレイタイム</span><output id="out-time">0.20秒</output></span>
+            <input id="sl-time" type="range" min="0.1" max="0.4" step="0.01" value="0.2">
+          </label>
+          <label class="slider">
+            <span class="slider-top"><span>残響（リバーブ）</span><output id="out-rev">30%</output></span>
+            <input id="sl-rev" type="range" min="0" max="1" step="0.01" value="0.3">
+          </label>
+        </div>
+
+        <div class="notice">
+          <p><strong>ハウリング（キーン音）を防ぐために</strong></p>
+          <p>イヤホン・ヘッドホンでの利用がおすすめです。スピーカーで鳴らす場合は、マイクとスピーカーを離し、音量を小さめから上げてください。キーンと鳴ったら「オフ」を押すか、マイク音量を下げてください。</p>
+        </div>
+      </section>
+
+      <!-- お出かけ -->
+      <section id="panel-outing" class="panel" role="tabpanel" hidden>
+        <p class="panel-lead">いまいる場所の雰囲気に合う曲を、ナビが選びます。</p>
+        <label class="field">気分や一緒にいる人（なくてもOK）
+          <input id="outing-note" type="text" maxlength="80" placeholder="例：家族でドライブ中、夕焼けがきれい">
+        </label>
+        <button id="btn-outing" class="btn btn-primary w-full">いまいる場所で選曲する</button>
+
+        <div class="listen">
+          <button id="sw-listen" class="switch" role="switch" aria-checked="false" aria-labelledby="listen-label"><span class="knob"></span></button>
+          <div>
+            <p id="listen-label" class="listen-label">「行こう！」で選曲スタート</p>
+            <p id="listen-state" class="listen-state">オフ</p>
+          </div>
+        </div>
+        <p class="hint">ONにすると、「行こう！」と話しかけるだけで現在地を調べ、1曲目を曲紹介から再生します。曲の再生中は歌詞に反応しないよう待ち受けを止めます。</p>
+        <p id="heard" class="heard" aria-live="polite"></p>
+
+        <p id="outing-status" class="outing-status" aria-live="polite"></p>
+        <div id="outing-area" class="outing-area" hidden></div>
+        <ul id="suggest-list" class="song-list"></ul>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="app-footer">
+    <p class="version" data-version aria-live="polite"></p>
+  </footer>
+</div>
+
+<!-- お気に入り編集 -->
+<dialog id="dlg-fav" class="dlg">
+  <form id="form-fav" method="dialog" class="space-y-4">
+    <h2 class="dlg-title">マイリストに保存</h2>
+    <input type="hidden" name="favId">
+    <input type="hidden" name="videoId">
+    <label class="field">曲名
+      <input name="songTitle" type="text" maxlength="120" required>
+    </label>
+    <label class="field">歌手名
+      <input name="artist" type="text" maxlength="80">
+    </label>
+    <label class="field">キー（原曲から ±）
+      <select name="keyShift"></select>
+    </label>
+    <label class="field">練習メモ
+      <textarea name="memo" rows="3" maxlength="500" placeholder="例：サビ前で息継ぎ、2番のAメロは走りがち"></textarea>
+    </label>
+    <label class="check"><input name="isOhako" type="checkbox"> 十八番にする</label>
+    <div class="dlg-actions">
+      <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
+      <button type="submit" class="btn btn-primary" value="save">保存する</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ハウリング注意 -->
+<dialog id="dlg-howl" class="dlg">
+  <form method="dialog" class="space-y-4">
+    <h2 class="dlg-title">マイクをONにする前に</h2>
+    <p>マイクの声にエコーをかけて、この端末のスピーカーから鳴らします。</p>
+    <p><strong>イヤホン・ヘッドホンの利用がおすすめです。</strong>スピーカーの近くでマイクを使うと「キーン」というハウリングが起きることがあります。</p>
+    <p>ブラウザから「マイクの使用」を求められたら「許可」を選んでください。</p>
+    <label class="check"><input id="howl-skip" type="checkbox"> 次回からこの案内を表示しない</label>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn btn-ghost">やめる</button>
+      <button value="ok" class="btn btn-primary">マイクをONにする</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script src="config.js?v=1.1.0"></script>
+<script src="app.js?v=1.1.0"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
