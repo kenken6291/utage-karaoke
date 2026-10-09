@@ -802,6 +802,9 @@ input[type="range"] { accent-color: var(--amber); height: 28px; }
   .fab-go { width: 72px; height: 72px; }
   .fab-label { font-size: 0.92rem; }
   .app-footer { padding-bottom: 104px; padding-right: 12px; }
+  .layout { padding-bottom: 96px; }
+  .side .panel { padding-bottom: 96px; }
+  .pick-bar { padding-right: 104px; }
   .toast { bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }
 }
 

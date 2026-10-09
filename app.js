@@ -756,9 +756,15 @@ function duck(on) {
 
 function showLine(text) { $('#navi-bubble').textContent = text; }
 
+/** Gemini音声を使うモードか（字幕あり・なしの両方） */
+function useGeminiVoice() {
+  return state.ttsMode === 'gemini' || state.ttsMode === 'gemini-notext';
+}
+
 function telop(text, sec) {
   const el = $('#telop');
-  if (state.naviHidden) { el.hidden = true; return; } // ナビ非表示中は字幕も出さない
+  // ナビ非表示中・「字幕なし」モードでは動画の上に字幕を出さない（歌詞が隠れるため）
+  if (state.naviHidden || state.ttsMode === 'gemini-notext') { el.hidden = true; return; }
   el.innerHTML = '';
   const span = document.createElement('span');
   span.className = 'telop-text is-wipe';
@@ -812,7 +818,7 @@ function fetchLine(scene, extra = {}) {
   const payload = {
     scene,
     character: state.character,
-    withAudio: state.ttsMode === 'gemini',
+    withAudio: useGeminiVoice(),
     song: s ? { title: s.title, artist: s.artist, keyShift: s.keyShift, memo: s.memo } : null,
     ...extra,
   };
@@ -1655,7 +1661,7 @@ async function runOutingFlow({ autoplay = false } = {}) {
       lng: pos.coords.longitude,
       speed: pos.coords.speed,
       character: state.character,
-      withAudio: state.ttsMode === 'gemini',
+      withAudio: useGeminiVoice(),
       note: $('#outing-note').value.trim(),
       era: $('#sel-go-era').value,
       vocal: $('#sel-go-vocal').value,
@@ -1916,6 +1922,7 @@ function bindApp() {
   $('#sel-tts').addEventListener('change', e => {
     state.ttsMode = e.target.value;
     if (state.ttsMode === 'none') Voice.stop();
+    if (state.ttsMode === 'gemini-notext') $('#telop').hidden = true;
     state.prefetch = {};
     if (state.song) state.prefetch.intro = fetchLine('intro');
     savePrefs();
