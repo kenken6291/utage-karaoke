@@ -655,6 +655,14 @@ const Voice = {
 
   async say(text, audio) {
     if (!text) return;
+    // 声なし：文字（吹き出し・字幕）だけ出して、待たずに次へ進む
+    if (state.ttsMode === 'none') {
+      this.stop();
+      showLine(text);
+      const c = CHARACTERS[state.character];
+      telop(text, (text.length * 0.14) / c.rate);
+      return;
+    }
     const my = ++this.token;
     this.stop(true);
     this.speaking = true;
@@ -770,7 +778,9 @@ function applyNaviVisibility() {
   if (state.naviHidden) $('#telop').hidden = true;
 }
 function setNaviHidden(hidden) {
+  const wasSilent = state.ttsMode === 'none' && state.naviHidden;
   state.naviHidden = hidden;
+  if (wasSilent && !hidden && state.song) state.prefetch = { intro: fetchLine('intro') };
   applyNaviVisibility();
   savePrefs();
   (hidden ? $('#btn-navi-show') : $('#btn-navi-hide')).focus();
@@ -796,6 +806,8 @@ function fallbackLine(scene, extra = {}) {
 
 /** セリフ（＋音声）を取得。失敗時はフォールバックのセリフを返す */
 function fetchLine(scene, extra = {}) {
+  // 声なし＋ナビ非表示なら、誰にも届かないのでAIを呼ばない（利用回数の節約）
+  if (state.ttsMode === 'none' && state.naviHidden) return Promise.resolve({ text: '', audio: null });
   const s = state.song;
   const payload = {
     scene,
@@ -1903,6 +1915,7 @@ function bindApp() {
   $('#sel-tts').value = state.ttsMode;
   $('#sel-tts').addEventListener('change', e => {
     state.ttsMode = e.target.value;
+    if (state.ttsMode === 'none') Voice.stop();
     state.prefetch = {};
     if (state.song) state.prefetch.intro = fetchLine('intro');
     savePrefs();
