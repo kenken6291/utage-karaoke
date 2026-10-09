@@ -73,6 +73,11 @@ const state = {
   favorites: [],
   favFilter: 'all',
   searchResults: [],
+  aiResults: [],
+  resultMode: 'none',  // 'youtube' | 'ai'
+  aiCondition: '',
+  dictating: false,
+  dictRecog: null,
   suggestions: [],
   song: null,          // {videoId,title,artist,keyShift,memo,favId}
   player: null,
@@ -179,7 +184,8 @@ function renderVersion() {
   else server = 'サーバー：確認中…';
 
   let warn = '';
-  if (versionInfo.server && versionInfo.server !== APP_VERSION) {
+  const minor = v => String(v).split('.').slice(0, 2).join('.');
+  if (versionInfo.server && minor(versionInfo.server) !== minor(APP_VERSION)) {
     warn = `<span class="ver-warn">画面とサーバーのバージョンが違います。GASを「新バージョン」で再デプロイしたか、ブラウザの再読み込みで最新の画面になっているか確認してください。</span>`;
   }
   $$('[data-version]').forEach(el => {
@@ -1047,46 +1053,175 @@ async function finishSong() {
 }
 
 /* ---------------------------------------------------------
- * 曲さがし
+ * 曲さがし（AI選曲・YouTube検索・音声入力）
  * ------------------------------------------------------- */
+const normKey = (title, artist) => `${title}|${artist}`.replace(/[\s　]/g, '').toLowerCase();
+
+function isInMylist(song) {
+  const k = normKey(song.title, song.artist);
+  return state.favorites.some(f => normKey(f.title, f.artist) === k || (song.videoId && f.videoId === song.videoId));
+}
+
 function bindSearch() {
-  $('#form-search').addEventListener('submit', async e => {
+  const form = $('#form-search');
+
+  // Enter・「AIで選曲」ボタン：URLならそのままセット、それ以外はAI選曲
+  form.addEventListener('submit', e => {
     e.preventDefault();
-    const f = e.target;
-    const q = f.q.value.trim();
-    if (!q) return;
+    const q = form.q.value.trim();
     const id = parseYouTubeId(q);
     if (id) {
       setSong({ videoId: id });
       toast('動画をセットしました');
       return;
     }
-    const list = $('#search-results');
-    list.innerHTML = '<li class="empty">検索中…</li>';
-    setBusy(f, true, '検索中');
-    try {
-      const r = await api('searchVideos', { q, karaoke: $('#chk-karaoke').checked });
-      state.searchResults = r.items;
-      renderSearch();
-    } catch (err) {
-      list.innerHTML = `<li class="empty">${esc(err.message)}</li>`;
-    } finally {
-      setBusy(f, false);
-    }
+    runAiPick();
   });
 
-  $('#search-results').addEventListener('click', e => {
+  $('#btn-yt-search').addEventListener('click', () => runYouTubeSearch(form.q.value.trim()));
+  $('#btn-dictate').addEventListener('click', toggleDictation);
+
+  $('#search-results').addEventListener('click', async e => {
+    const li = e.target.closest('li[data-idx]');
+    if (!li) return;
+    const idx = Number(li.dataset.idx);
+
+    if (state.resultMode === 'ai') {
+      const cb = e.target.closest('input[type="checkbox"]');
+      if (cb) {
+        state.aiResults[idx].checked = cb.checked;
+        li.classList.toggle('is-checked', cb.checked);
+        renderPickBar();
+        return;
+      }
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const song = state.aiResults[idx];
+      if (btn.dataset.act === 'sing' || btn.dataset.act === 'set') {
+        const ok = await ensureVideo(song, btn);
+        if (!ok) return;
+        setSong({ videoId: song.videoId, title: song.title, artist: song.artist });
+        if (btn.dataset.act === 'sing') startWithIntro(); else toast('セットしました');
+      }
+      return;
+    }
+
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
-    const item = state.searchResults[Number(btn.closest('li').dataset.idx)];
+    const item = state.searchResults[idx];
     if (!item) return;
     if (btn.dataset.act === 'set') { setSong({ videoId: item.videoId, title: item.title }); toast('セットしました。「曲紹介から歌う」で始めましょう'); }
     if (btn.dataset.act === 'fav') openFavDialog({ videoId: item.videoId, title: item.title, artist: '', keyShift: 0, memo: '', isOhako: false });
   });
+
+  $('#chk-pick-all').addEventListener('change', e => {
+    state.aiResults.forEach(s => { if (!s.registered) s.checked = e.target.checked; });
+    renderSearch();
+  });
+  $('#btn-pick-add').addEventListener('click', registerChecked);
+}
+
+async function runAiPick() {
+  const form = $('#form-search');
+  const keyword = form.q.value.trim();
+  const era = $('#sel-era').value;
+  const vocal = $('#sel-vocal').value;
+  if (!keyword && !era && !vocal) {
+    toast('キーワードを入れるか、年代・ボーカルを選んでください', 'error');
+    return;
+  }
+  const list = $('#search-results');
+  $('#pick-bar').hidden = true;
+  $('#result-head').hidden = true;
+  list.innerHTML = '<li class="empty">AIが選曲しています…</li>';
+  setBusy(form, true, '選曲中…');
+  try {
+    const r = await withTimeout(api('aiPickSongs', { keyword, era, vocal, count: 10 }), 45000);
+    state.aiCondition = r.condition || '';
+    state.aiResults = (r.songs || []).map(s => ({ ...s, checked: false, registered: isInMylist(s), videoId: '' }));
+    state.resultMode = 'ai';
+    renderSearch();
+  } catch (err) {
+    list.innerHTML = `<li class="empty">${esc(err.message)}</li>`;
+  } finally {
+    setBusy(form, false);
+  }
+}
+
+async function runYouTubeSearch(q) {
+  if (!q) { toast('検索ワードを入力してください', 'error'); return; }
+  const id = parseYouTubeId(q);
+  if (id) { setSong({ videoId: id }); toast('動画をセットしました'); return; }
+  const btn = $('#btn-yt-search');
+  const list = $('#search-results');
+  $('#pick-bar').hidden = true;
+  $('#result-head').hidden = true;
+  list.innerHTML = '<li class="empty">検索中…</li>';
+  btn.disabled = true;
+  try {
+    const r = await api('searchVideos', { q, karaoke: $('#chk-karaoke').checked });
+    state.searchResults = r.items;
+    state.resultMode = 'youtube';
+    renderSearch();
+  } catch (err) {
+    list.innerHTML = `<li class="empty">${esc(err.message)}</li>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** AI選曲の曲にYouTube動画IDが無ければ探す */
+async function ensureVideo(song, btn) {
+  if (song.videoId) return true;
+  const label = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '動画を探し中…'; }
+  try {
+    const r = await api('resolveVideos', { songs: [{ title: song.title, artist: song.artist }] });
+    const v = r.songs?.[0]?.videoId;
+    if (!v) { toast('カラオケ動画が見つかりませんでした。「YouTubeで検索」も試してください', 'error'); return false; }
+    song.videoId = v;
+    return true;
+  } catch (err) {
+    toast(err.message, 'error');
+    return false;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
 }
 
 function renderSearch() {
   const list = $('#search-results');
+  const head = $('#result-head');
+
+  if (state.resultMode === 'ai') {
+    head.hidden = false;
+    head.innerHTML = `AI選曲 <strong>${state.aiResults.length}曲</strong>${state.aiCondition ? `　条件：${esc(state.aiCondition)}` : ''}`;
+    if (!state.aiResults.length) {
+      list.innerHTML = '<li class="empty">条件に合う曲が見つかりませんでした。キーワードや条件を変えてみてください。</li>';
+      $('#pick-bar').hidden = true;
+      return;
+    }
+    list.innerHTML = state.aiResults.map((s, i) => `
+      <li class="song-row ai-row${s.checked ? ' is-checked' : ''}" data-idx="${i}">
+        <label class="pick">
+          <input type="checkbox" ${s.checked ? 'checked' : ''} ${s.registered ? 'disabled' : ''} aria-label="${esc(s.title)}を選ぶ">
+        </label>
+        <div class="song-meta">
+          <p class="song-title">${esc(s.title)}</p>
+          <p class="song-sub">${esc(s.artist)}${s.year ? `<span>${esc(s.year)}年</span>` : ''}${s.vocal ? `<span class="vocal-chip">${esc(s.vocal)}</span>` : ''}${s.registered ? '<span class="done-chip">登録済み</span>' : ''}</p>
+          ${s.reason ? `<p class="song-reason">${esc(s.reason)}</p>` : ''}
+          <div class="song-actions" style="margin-top:8px">
+            <button class="btn btn-sm btn-primary" data-act="sing">曲紹介から歌う</button>
+            <button class="btn btn-sm" data-act="set">セットだけ</button>
+          </div>
+        </div>
+      </li>`).join('');
+    renderPickBar();
+    return;
+  }
+
+  $('#pick-bar').hidden = true;
+  head.hidden = true;
   if (!state.searchResults.length) {
     list.innerHTML = '<li class="empty">見つかりませんでした。曲名と歌手名を組み合わせて検索してみてください。</li>';
     return;
@@ -1105,6 +1240,128 @@ function renderSearch() {
     </li>`).join('');
 }
 
+function renderPickBar() {
+  const bar = $('#pick-bar');
+  const selectable = state.aiResults.filter(s => !s.registered);
+  const n = state.aiResults.filter(s => s.checked && !s.registered).length;
+  bar.hidden = state.resultMode !== 'ai' || !state.aiResults.length;
+  const btn = $('#btn-pick-add');
+  if (!btn.dataset.busy) {
+    btn.disabled = n === 0;
+    btn.textContent = n ? `チェックした${n}曲をマイリストに登録` : 'チェックした曲をマイリストに登録';
+  }
+  const all = $('#chk-pick-all');
+  all.disabled = selectable.length === 0;
+  all.checked = selectable.length > 0 && n === selectable.length;
+}
+
+async function registerChecked() {
+  const targets = state.aiResults.filter(s => s.checked && !s.registered);
+  if (!targets.length) return;
+  const btn = $('#btn-pick-add');
+  btn.dataset.busy = '1';
+  btn.disabled = true;
+  btn.textContent = `${targets.length}曲の動画を探して登録中…`;
+  try {
+    const r = await withTimeout(api('addSongsToMylist', {
+      items: targets.map(s => ({ title: s.title, artist: s.artist, videoId: s.videoId })),
+    }), 60000);
+    const byKey = new Map(targets.map(s => [normKey(s.title, s.artist), s]));
+    (r.added || []).forEach(fav => {
+      upsertFav(fav);
+      const s = byKey.get(normKey(fav.title, fav.artist));
+      if (s) { s.registered = true; s.checked = false; s.videoId = fav.videoId; }
+    });
+    const notFound = [];
+    (r.skipped || []).forEach(sk => {
+      const s = byKey.get(normKey(sk.title, sk.artist));
+      if (!s) return;
+      if (sk.reason === '登録済み') { s.registered = true; s.checked = false; }
+      else notFound.push(`${sk.title}（${sk.reason}）`);
+    });
+    const msg = `${(r.added || []).length}曲をマイリストに登録しました`
+      + (notFound.length ? `。登録できなかった曲：${notFound.join('、')}` : '');
+    toast(msg, notFound.length ? 'error' : 'info');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    delete btn.dataset.busy;
+    renderSearch();
+  }
+}
+
+/* 音声入力（話し終わったらAI選曲を自動実行） */
+function toggleDictation() {
+  if (state.dictating) {
+    try { state.dictRecog?.stop(); } catch {}
+    return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('このブラウザは音声入力に対応していません（Chrome・Safariの最新版をお使いください）', 'error'); return; }
+
+  const input = $('#form-search').q;
+  const stateEl = $('#dictate-state');
+  const r = new SR();
+  r.lang = 'ja-JP';
+  r.continuous = false;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+  let finalText = '';
+
+  r.onstart = () => {
+    stateEl.hidden = false;
+    stateEl.textContent = '聞いています…話し終わると自動で選曲します';
+  };
+  r.onresult = ev => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const t = ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) finalText += t; else interim += t;
+    }
+    input.value = (finalText + interim).trim();
+  };
+  r.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('音声入力のためのマイク使用が許可されていません', 'error');
+    else if (ev.error === 'no-speech') toast('声が聞き取れませんでした。もう一度どうぞ', 'error');
+  };
+  r.onend = () => {
+    state.dictating = false;
+    state.dictRecog = null;
+    renderDictateUI();
+    stateEl.hidden = true;
+    updateListening();
+    const text = finalText.trim();
+    if (text) {
+      input.value = text;
+      const id = parseYouTubeId(text);
+      if (!id) runAiPick();
+    }
+  };
+
+  state.dictating = true;
+  state.dictRecog = r;
+  renderDictateUI();
+  const wasRunning = state.recogRunning;
+  updateListening(); // 「行こう！」待ち受けを一時停止
+  AC.resume().catch(() => {});
+  setTimeout(() => {
+    try { r.start(); }
+    catch (err) {
+      state.dictating = false;
+      state.dictRecog = null;
+      renderDictateUI();
+      updateListening();
+      toast('音声入力を開始できませんでした', 'error');
+    }
+  }, wasRunning ? 450 : 0);
+}
+
+function renderDictateUI() {
+  const b = $('#btn-dictate');
+  b.setAttribute('aria-pressed', String(state.dictating));
+  b.setAttribute('aria-label', state.dictating ? '音声入力を止める' : '声で入力');
+}
+
 /* ---------------------------------------------------------
  * マイリスト
  * ------------------------------------------------------- */
@@ -1114,6 +1371,10 @@ async function loadFavorites() {
     const r = await api('listFavorites');
     state.favorites = r.favorites;
     renderFavorites();
+    if (state.resultMode === 'ai') {
+      state.aiResults.forEach(s => { if (isInMylist(s)) { s.registered = true; s.checked = false; } });
+      renderSearch();
+    }
   } catch (err) {
     $('#fav-list').innerHTML = `<li class="empty">${esc(err.message)}</li>`;
   }
@@ -1252,17 +1513,93 @@ function getPosition() {
 
 function setOutingStatus(t) { $('#outing-status').textContent = t; }
 
+const STEP_ORDER = ['locate', 'guess', 'pick', 'go'];
+const STEP_SCREEN = {
+  locate: { ico: '📍', text: '現在地をキャッチ中…', moving: false },
+  guess:  { ico: '🗺️', text: 'この辺りの雰囲気を推理中…', moving: true },
+  pick:   { ico: '🎵', text: 'ぴったりの曲を選曲中…', moving: true },
+  go:     { ico: '🎤', text: '出発進行！', moving: true },
+};
+
+/** スクリーン上の出発演出 */
+function showGoOverlay(step, sub = '') {
+  const ov = $('#go-overlay');
+  if (!step) { ov.hidden = true; ov.className = 'go-overlay'; return; }
+  const d = STEP_SCREEN[step];
+  ov.hidden = false;
+  ov.classList.toggle('is-moving', !!d?.moving);
+  ov.classList.remove('is-arrived');
+  if (d) {
+    $('#go-ov-ico').textContent = d.ico;
+    $('#go-ov-text').textContent = d.text;
+    $('#go-ov-sub').textContent = sub;
+  }
+}
+
+function showArrival(r) {
+  const ov = $('#go-overlay');
+  ov.hidden = false;
+  ov.classList.remove('is-moving');
+  ov.classList.add('is-arrived');
+  $('#go-ov-ico').textContent = sceneEmoji(r.scene);
+  $('#go-ov-text').textContent = `${r.area || 'このあたり'}に到着！`;
+  $('#go-ov-sub').textContent = [r.scene && `${r.scene}エリア`, r.mood && `ムード：${r.mood}`].filter(Boolean).join('　');
+}
+
+function setStep(step) {
+  if (step && step !== 'done' && STEP_SCREEN[step]) showGoOverlay(step);
+  const steps = $('#go-steps');
+  steps.hidden = !step;
+  const idx = STEP_ORDER.indexOf(step);
+  $$('#go-steps li').forEach(li => {
+    const i = STEP_ORDER.indexOf(li.dataset.step);
+    li.classList.toggle('is-done', idx >= 0 && (i < idx || step === 'done'));
+    li.classList.toggle('is-active', i === idx);
+  });
+  if (step === 'done') $$('#go-steps li').forEach(li => { li.classList.add('is-done'); li.classList.remove('is-active'); });
+}
+
+function sceneEmoji(scene = '') {
+  const s = String(scene);
+  if (/海|浜|港|湾|岬/.test(s)) return '🌊';
+  if (/山|峠|高原|森/.test(s)) return '⛰️';
+  if (/川|湖|渓/.test(s)) return '🏞️';
+  if (/温泉/.test(s)) return '♨️';
+  if (/車|移動|ドライブ|高速/.test(s)) return '🚗';
+  if (/旅|観光|名所/.test(s)) return '🧳';
+  if (/田|畑|里|農/.test(s)) return '🌾';
+  if (/自宅|住宅|家/.test(s)) return '🏠';
+  if (/街|都|駅|繁華|ビル/.test(s)) return '🏙️';
+  return '📍';
+}
+
+function renderTicket(r) {
+  const now = new Date();
+  $('#ticket-time').textContent = `${now.getMonth() + 1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} 発`;
+  $('#ticket-emoji').textContent = sceneEmoji(r.scene);
+  $('#ticket-area').textContent = r.area || 'このあたり';
+  $('#ticket-scene').textContent = r.scene ? `${r.scene}エリア` : '';
+  $('#ticket-mood').textContent = r.mood || '';
+  const t = $('#ticket');
+  t.hidden = true;
+  void t.offsetWidth; // アニメーションを毎回やり直す
+  t.hidden = false;
+}
+
 async function runOutingFlow({ autoplay = false } = {}) {
   if (state.busyOuting) return;
   state.busyOuting = true;
   updateListening();
-  $('#btn-outing').disabled = true;
+  setGoButtons(true);
+  $('#ticket').hidden = true;
+  $('#suggest-list').innerHTML = '';
+  setOutingStatus('');
   try {
-    setOutingStatus('現在地を取得中…');
+    setStep('locate');
     const pos = await getPosition();
-    setOutingStatus('この場所に合う曲を考え中…');
+    setStep('guess');
     setNavi(true, '選曲中');
-    const r = await withTimeout(api('suggestByLocation', {
+    const req = withTimeout(api('suggestByLocation', {
       lat: pos.coords.latitude,
       lng: pos.coords.longitude,
       speed: pos.coords.speed,
@@ -1270,54 +1607,80 @@ async function runOutingFlow({ autoplay = false } = {}) {
       withAudio: state.ttsMode === 'gemini',
       note: $('#outing-note').value.trim(),
     }), 45000);
+    // 推理→選曲の表示を少し進める（サーバーは1回の通信で両方やる）
+    const stepTimer = setTimeout(() => setStep('pick'), 2500);
+    const r = await req;
+    clearTimeout(stepTimer);
     setNavi(false);
+
     state.suggestions = r.songs || [];
-    $('#outing-area').hidden = false;
-    $('#outing-area').innerHTML = `<strong>${esc(r.area)}</strong>（${esc(r.scene)}）　ムード：${esc(r.mood)}`;
+    showArrival(r);
+    renderTicket(r);
     renderSuggestions();
-    setOutingStatus('');
+    setStep(autoplay ? 'go' : 'done');
     await Voice.say(r.comment, r.audio);
 
     if (autoplay) {
       const first = state.suggestions.find(s => s.videoId);
       if (first) {
         setSong({ videoId: first.videoId, title: first.title, artist: first.artist });
+        $('#screen-empty').hidden = true;
+        showGoOverlay('go', `1曲目は「${first.title}」`);
+        setStep('done');
         await startWithIntro();
+        showGoOverlay(null);
       } else {
+        setStep('done');
         toast('再生できる動画が見つかりませんでした。候補から選んでください', 'error');
       }
     }
   } catch (err) {
     setNavi(false);
+    setStep(null);
+    showGoOverlay(null);
     setOutingStatus(err.message);
     toast(err.message, 'error');
   } finally {
     state.busyOuting = false;
-    $('#btn-outing').disabled = false;
+    setGoButtons(false);
     updateListening();
+    // 曲が始まっていなければ数秒後に演出を閉じる
+    setTimeout(() => { if (!state.busyOuting) showGoOverlay(null); }, autoplay ? 400 : 3500);
   }
+}
+
+function setGoButtons(busy) {
+  ['#btn-outing', '#btn-go', '#fab-go', '#btn-empty-go'].forEach(id => { const b = $(id); if (b) b.disabled = busy; });
 }
 
 function renderSuggestions() {
   const list = $('#suggest-list');
+  const firstPlayable = state.suggestions.findIndex(s => s.videoId);
   list.innerHTML = state.suggestions.map((s, i) => `
-    <li class="song-row" data-idx="${i}">
-      ${s.videoId ? `<img src="https://i.ytimg.com/vi/${esc(s.videoId)}/mqdefault.jpg" alt="" loading="lazy">` : '<div class="noimg">動画なし</div>'}
-      <div class="song-meta">
-        <p class="song-title">${esc(s.title)}</p>
-        <p class="song-sub">${esc(s.artist)}</p>
-        <p class="song-reason">${esc(s.reason)}</p>
-      </div>
+    <li class="station${i === firstPlayable ? ' is-first' : ''}" data-idx="${i}">
+      <span class="station-dot" aria-hidden="true"></span>
+      ${i === firstPlayable ? '<span class="first-badge">1曲目</span>' : ''}
+      <p class="song-title">${esc(s.title)}</p>
+      <p class="song-sub">${esc(s.artist)}${isInMylist(s) ? '<span class="done-chip">登録済み</span>' : ''}</p>
+      <p class="song-reason">${esc(s.reason)}</p>
       <div class="song-actions">
         ${s.videoId
           ? `<button class="btn btn-sm btn-primary" data-act="sing">曲紹介から歌う</button>
              <button class="btn btn-sm" data-act="fav">マイリストへ</button>`
-          : '<button class="btn btn-sm" data-act="search">曲さがしで探す</button>'}
+          : '<button class="btn btn-sm" data-act="search">YouTubeで探す</button>'}
       </div>
     </li>`).join('');
 }
 
 function bindOuting() {
+  const go = () => {
+    AC.resume().catch(() => {});
+    selectTab('outing');
+    runOutingFlow({ autoplay: true });
+  };
+  $('#btn-go').addEventListener('click', go);
+  $('#fab-go').addEventListener('click', go);
+  $('#btn-empty-go').addEventListener('click', go);
   $('#btn-outing').addEventListener('click', () => { AC.resume().catch(() => {}); runOutingFlow(); });
 
   $('#suggest-list').addEventListener('click', e => {
@@ -1329,9 +1692,9 @@ function bindOuting() {
     if (btn.dataset.act === 'fav') openFavDialog({ videoId: s.videoId, title: s.title, artist: s.artist, keyShift: 0, memo: '', isOhako: false });
     if (btn.dataset.act === 'search') {
       selectTab('search');
-      const f = $('#form-search');
-      f.q.value = `${s.title} ${s.artist}`;
-      f.requestSubmit();
+      const q = `${s.title} ${s.artist}`;
+      $('#form-search').q.value = q;
+      runYouTubeSearch(q);
     }
   });
 
@@ -1380,7 +1743,7 @@ function setListening(on) {
 }
 
 function shouldListen() {
-  return state.listening && !Voice.speaking && state.playerState !== YT_STATE.PLAYING && !state.busyOuting;
+  return state.listening && !Voice.speaking && state.playerState !== YT_STATE.PLAYING && !state.busyOuting && !state.dictating;
 }
 
 function updateListening() {
@@ -1402,12 +1765,18 @@ function updateListenUI() {
   let text = 'オフ';
   if (state.listening) {
     if (state.busyOuting) text = '選曲中のため待ち受けを止めています';
+    else if (state.dictating) text = '音声入力中のため待ち受けを止めています';
     else if (state.playerState === YT_STATE.PLAYING) text = '再生中のため待ち受けを止めています';
     else if (Voice.speaking) text = 'ナビが話し終わるまで待っています';
-    else text = '「行こう！」と話しかけてください';
+    else text = '耳をすませています。「行こう！」と話しかけてください';
   }
   st.textContent = text;
   st.classList.toggle('is-active', state.listening && shouldListen());
+  const ear = state.listening && shouldListen();
+  $('#btn-go')?.classList.toggle('is-listening', ear);
+  $('#fab-go')?.classList.toggle('is-listening', ear);
+  const fe = $('#fab-ear');
+  if (fe) fe.hidden = !ear;
 }
 
 async function onTrigger() {

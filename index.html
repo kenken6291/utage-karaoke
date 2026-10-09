@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2A0E22">
   <!-- 画面のバージョン：更新したら content と下の ?v= をそろえて上げる -->
-  <meta name="app-version" content="1.1.0" data-updated="2026-10-09">
+  <meta name="app-version" content="1.2.1" data-updated="2026-10-09">
   <title>UTAGE — YouTubeカラオケ</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.1.0">
+  <link rel="stylesheet" href="style.css?v=1.2.1">
 </head>
 <body>
 
@@ -121,8 +121,17 @@
       <div class="screen">
         <div id="yt-player"></div>
         <div id="telop" class="telop" hidden aria-hidden="true"></div>
+        <!-- お出かけ選曲の演出（スクリーン上に表示） -->
+        <div id="go-overlay" class="go-overlay" hidden aria-live="polite">
+          <div class="go-ov-road" aria-hidden="true"></div>
+          <div id="go-ov-ico" class="go-ov-ico" aria-hidden="true">📍</div>
+          <p id="go-ov-text" class="go-ov-text"></p>
+          <p id="go-ov-sub" class="go-ov-sub"></p>
+        </div>
         <div id="screen-empty" class="screen-empty">
-          <p>右の「曲さがし」から曲を選ぶと、ここで再生されます</p>
+          <p>「曲さがし」で曲を選ぶか、</p>
+          <button type="button" id="btn-empty-go" class="empty-go">📍 いまいる場所で「行こう！」</button>
+          <p class="empty-go-note">この場所に合う曲をナビが選んで、歌い出しまで案内します</p>
         </div>
       </div>
 
@@ -198,12 +207,54 @@
 
       <!-- 曲さがし -->
       <section id="panel-search" class="panel" role="tabpanel">
-        <form id="form-search" class="search-form">
-          <input name="q" type="search" placeholder="曲名・歌手名、またはYouTubeのURL" aria-label="検索ワード" autocomplete="off">
-          <button type="submit" class="btn btn-primary">検索</button>
+        <form id="form-search" class="search-form" novalidate>
+          <div class="search-box">
+            <input name="q" type="search" placeholder="曲名・歌手名・気分、またはYouTubeのURL" aria-label="検索ワード" autocomplete="off">
+            <button type="button" id="btn-dictate" class="btn-dictate" aria-pressed="false" aria-label="声で入力" title="声で入力">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <p id="dictate-state" class="dictate-state" aria-live="polite" hidden></p>
+
+          <div class="filters">
+            <label class="mini-field">年代
+              <select id="sel-era" name="era">
+                <option value="">指定なし</option>
+                <option value="1960s">1960年代</option>
+                <option value="1970s">1970年代</option>
+                <option value="1980s">1980年代</option>
+                <option value="1990s">1990年代</option>
+                <option value="2000s">2000年代</option>
+                <option value="2010s">2010年代</option>
+                <option value="2020s">2020年代</option>
+              </select>
+            </label>
+            <label class="mini-field">ボーカル
+              <select id="sel-vocal" name="vocal">
+                <option value="">指定なし</option>
+                <option value="female">女性ボーカル</option>
+                <option value="male">男性ボーカル</option>
+                <option value="duet">デュエット</option>
+                <option value="group">グループ・合唱</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="search-actions">
+            <button type="submit" class="btn btn-primary">AIで選曲</button>
+            <button type="button" id="btn-yt-search" class="btn">YouTubeで検索</button>
+          </div>
+          <label class="check"><input id="chk-karaoke" type="checkbox" checked> YouTube検索に「カラオケ」を付ける</label>
+          <p class="hint">マイクボタンで話すと、そのままAIが選曲します（例：「80年代の女性ボーカルで明るい曲」）。年代・ボーカルの指定はAI選曲で使われます。</p>
         </form>
-        <label class="check"><input id="chk-karaoke" type="checkbox" checked> 「カラオケ」を付けて検索する</label>
+
+        <p id="result-head" class="result-head" hidden></p>
         <ul id="search-results" class="song-list"></ul>
+
+        <div id="pick-bar" class="pick-bar" hidden>
+          <label class="check"><input id="chk-pick-all" type="checkbox"> すべて選ぶ</label>
+          <button id="btn-pick-add" class="btn btn-primary" disabled>チェックした曲をマイリストに登録</button>
+        </div>
       </section>
 
       <!-- マイリスト -->
@@ -259,29 +310,63 @@
       </section>
 
       <!-- お出かけ -->
-      <section id="panel-outing" class="panel" role="tabpanel" hidden>
-        <p class="panel-lead">いまいる場所の雰囲気に合う曲を、ナビが選びます。</p>
-        <label class="field">気分や一緒にいる人（なくてもOK）
-          <input id="outing-note" type="text" maxlength="80" placeholder="例：家族でドライブ中、夕焼けがきれい">
-        </label>
-        <button id="btn-outing" class="btn btn-primary w-full">いまいる場所で選曲する</button>
+      <section id="panel-outing" class="panel outing" role="tabpanel" hidden>
+        <div class="go-stage">
+          <button id="btn-go" class="btn-go" aria-describedby="go-desc">
+            <span class="go-label">行こう！</span>
+            <span class="go-sub">いまいる場所で選曲して出発</span>
+          </button>
+          <p id="go-desc" class="go-desc">押すか、「行こう！」と話しかけると、この場所に合う曲を選んで1曲目から歌い出します。</p>
+        </div>
 
         <div class="listen">
           <button id="sw-listen" class="switch" role="switch" aria-checked="false" aria-labelledby="listen-label"><span class="knob"></span></button>
           <div>
-            <p id="listen-label" class="listen-label">「行こう！」で選曲スタート</p>
+            <p id="listen-label" class="listen-label">声で出発（「行こう！」待ち受け）</p>
             <p id="listen-state" class="listen-state">オフ</p>
           </div>
         </div>
-        <p class="hint">ONにすると、「行こう！」と話しかけるだけで現在地を調べ、1曲目を曲紹介から再生します。曲の再生中は歌詞に反応しないよう待ち受けを止めます。</p>
         <p id="heard" class="heard" aria-live="polite"></p>
 
+        <label class="field">気分や一緒にいる人（なくてもOK）
+          <input id="outing-note" type="text" maxlength="80" placeholder="例：家族でドライブ中、夕焼けがきれい">
+        </label>
+        <button id="btn-outing" class="btn btn-ghost w-full">曲の候補だけ見る</button>
+
+        <ol id="go-steps" class="go-steps" hidden aria-live="polite">
+          <li data-step="locate"><span class="step-ico" aria-hidden="true">📍</span>現在地をキャッチ</li>
+          <li data-step="guess"><span class="step-ico" aria-hidden="true">🗺️</span>この辺りの雰囲気を推理</li>
+          <li data-step="pick"><span class="step-ico" aria-hidden="true">🎵</span>ぴったりの曲を選曲</li>
+          <li data-step="go"><span class="step-ico" aria-hidden="true">🎤</span>出発進行！</li>
+        </ol>
         <p id="outing-status" class="outing-status" aria-live="polite"></p>
-        <div id="outing-area" class="outing-area" hidden></div>
-        <ul id="suggest-list" class="song-list"></ul>
+
+        <div id="ticket" class="ticket" hidden>
+          <div class="ticket-head">
+            <span class="ticket-brand">UTAGE号　ご当地選曲きっぷ</span>
+            <span id="ticket-time" class="ticket-time"></span>
+          </div>
+          <div class="ticket-main">
+            <div id="ticket-emoji" class="ticket-emoji" aria-hidden="true">📍</div>
+            <div class="ticket-text">
+              <p id="ticket-area" class="ticket-area"></p>
+              <p id="ticket-scene" class="ticket-scene"></p>
+            </div>
+          </div>
+          <p class="ticket-mood">今日のムード：<span id="ticket-mood"></span></p>
+          <span class="ticket-stamp" aria-hidden="true">選曲済</span>
+        </div>
+
+        <ol id="suggest-list" class="route"></ol>
       </section>
     </aside>
   </div>
+
+  <!-- どの画面からでも押せる「行こう！」 -->
+  <button id="fab-go" class="fab-go" aria-label="行こう！ いまいる場所で選曲して出発">
+    <span class="fab-label">行こう！</span>
+    <span id="fab-ear" class="fab-ear" hidden>👂 待ち受け中</span>
+  </button>
 
   <footer class="app-footer">
     <p class="version" data-version aria-live="polite"></p>
@@ -331,8 +416,8 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 
-<script src="config.js?v=1.1.0"></script>
-<script src="app.js?v=1.1.0"></script>
+<script src="config.js?v=1.2.1"></script>
+<script src="app.js?v=1.2.1"></script>
 <script src="https://www.youtube.com/iframe_api"></script>
 </body>
 </html>

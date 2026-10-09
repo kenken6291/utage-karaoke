@@ -21,7 +21,7 @@
 
 const APP_NAME = 'UTAGE';
 // サーバー側のバージョン：Code.gs を直したら上げて「新バージョン」で再デプロイ
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const APP_UPDATED = '2026-10-09';
 const SHEETS = { USERS: 'users', FAVS: 'favorites' };
 const USER_COLS = ['email', 'passwordHash', 'salt', 'status', 'mustReset', 'nickname', 'character',
@@ -35,6 +35,11 @@ const MAX_FAIL = 5;
 const LOCK_MINUTES = 15;
 const MAX_FAVS = 300;
 const STATUS = { TEMP: '仮登録', ACTIVE: '有効', STOP: '停止' };
+const ERAS = {
+  '1960s': '1960年代', '1970s': '1970年代', '1980s': '1980年代', '1990s': '1990年代',
+  '2000s': '2000年代', '2010s': '2010年代', '2020s': '2020年代'
+};
+const VOCALS = { female: '女性ボーカル', male: '男性ボーカル', duet: '男女デュエット', group: 'グループ・合唱' };
 
 const PERSONAS = {
   mama: {
@@ -90,7 +95,10 @@ function doPost(e) {
     aiSpeak: aiSpeak_,
     tts: tts_,
     suggestByLocation: suggestByLocation_,
-    searchVideos: searchVideos_
+    searchVideos: searchVideos_,
+    aiPickSongs: aiPickSongs_,
+    resolveVideos: resolveVideos_,
+    addSongsToMylist: addSongsToMylist_
   };
 
   try {
@@ -502,22 +510,8 @@ function suggestByLocation_(req, sess) {
     return { title: clip_(s.title, 80), artist: clip_(s.artist, 40), reason: clip_(s.reason, 60) };
   });
 
-  // YouTube でカラオケ動画を並列検索
-  const key = prop_('YOUTUBE_API_KEY');
-  if (key && songs.length) {
-    const reqs = songs.map(function (s) {
-      return { url: ytSearchUrl_(s.title + ' ' + s.artist + ' カラオケ', 1, key), muteHttpExceptions: true };
-    });
-    const resps = UrlFetchApp.fetchAll(reqs);
-    resps.forEach(function (r, i) {
-      if (r.getResponseCode() !== 200) return;
-      const items = JSON.parse(r.getContentText()).items || [];
-      if (items[0] && items[0].id && items[0].id.videoId) {
-        songs[i].videoId = items[0].id.videoId;
-        songs[i].videoTitle = decodeHtml_(items[0].snippet.title);
-      }
-    });
-  }
+  // YouTube でカラオケ動画を並列検索（キー未設定でも提案だけは返す）
+  try { ytResolve_(songs); } catch (e) { console.warn('ytResolve', e); }
 
   const comment = cleanLine_(out.comment || '');
   let audio = null;
@@ -532,8 +526,151 @@ function suggestByLocation_(req, sess) {
 }
 
 /* ---------------------------------------------------------
+ * AI選曲（キーワード・年代・ボーカル）
+ * ------------------------------------------------------- */
+function aiPickSongs_(req, sess) {
+  checkAiQuota_(sess.email);
+  const keyword = clip_(String(req.keyword || '').trim(), 100);
+  const era = ERAS[req.era] || '';
+  const vocal = VOCALS[req.vocal] || '';
+  const count = Math.max(3, Math.min(15, Number(req.count) || 10));
+  if (!keyword && !era && !vocal) throw appError_('キーワード・年代・ボーカルのどれかを指定してください');
+
+  const sys = 'あなたは日本のカラオケ事情に詳しい選曲の専門家です。実在する曲だけを、正確な曲名と歌手名で答えます。';
+  const user = '次の条件に合うカラオケ曲を' + count + '曲選んでください。\n'
+    + '- キーワード（話し言葉の場合あり）：' + (keyword || '指定なし') + '\n'
+    + '- 年代：' + (era || '指定なし') + '\n'
+    + '- ボーカル：' + (vocal || '指定なし') + '\n\n'
+    + 'ルール：\n'
+    + '・キーワードの中に年代やボーカルの指定が含まれていれば、そちらを優先する\n'
+    + '・キーワードが特定の曲名なら、その曲を1曲目にし、残りは雰囲気の近い曲にする\n'
+    + '・キーワードが歌手名なら、その歌手の代表曲を中心にする\n'
+    + '・YouTubeでカラオケ音源が見つかりやすい有名曲を優先する\n'
+    + '・同じ曲を重複させない\n'
+    + 'year：発売年（西暦の数値）\n'
+    + 'vocal：「女性」「男性」「デュエット」「グループ」のいずれか\n'
+    + 'reason：選んだ理由（30文字以内）';
+  const schema = {
+    type: 'OBJECT',
+    properties: {
+      songs: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING' }, artist: { type: 'STRING' }, year: { type: 'INTEGER' },
+            vocal: { type: 'STRING' }, reason: { type: 'STRING' }
+          },
+          required: ['title', 'artist', 'year', 'vocal', 'reason']
+        }
+      }
+    },
+    required: ['songs']
+  };
+
+  let out;
+  try {
+    out = JSON.parse(geminiText_(sys, user, { json: true, schema: schema, temperature: 0.8, maxTokens: 4096 }));
+  } catch (e) {
+    throw appError_('AI選曲に失敗しました。もう一度お試しください');
+  }
+  const seen = {};
+  const songs = (out.songs || []).map(function (s) {
+    return {
+      title: clip_(s.title, 80), artist: clip_(s.artist, 40),
+      year: Number(s.year) || '', vocal: clip_(s.vocal, 10), reason: clip_(s.reason, 60)
+    };
+  }).filter(function (s) {
+    const k = (s.title + '|' + s.artist).replace(/\s/g, '');
+    if (!s.title || seen[k]) return false;
+    seen[k] = true;
+    return true;
+  }).slice(0, count);
+
+  return { ok: true, songs: songs, condition: [era, vocal, keyword].filter(String).join('／') };
+}
+
+/** 曲名＋歌手名からカラオケ動画を探す（1回で最大10曲） */
+function resolveVideos_(req, sess) {
+  const songs = (req.songs || []).slice(0, 10).map(function (s) {
+    return { title: clip_(String(s.title || '').trim(), 120), artist: clip_(String(s.artist || '').trim(), 80) };
+  }).filter(function (s) { return s.title; });
+  if (!songs.length) throw appError_('曲が指定されていません');
+  ytResolve_(songs);
+  return { ok: true, songs: songs };
+}
+
+/** チェックした曲をまとめてマイリストに登録（動画IDが無ければ検索して補完） */
+function addSongsToMylist_(req, sess) {
+  const items = (req.items || []).slice(0, 20).map(function (s) {
+    const vid = String(s.videoId || '');
+    return {
+      title: clip_(String(s.title || '').trim(), 120),
+      artist: clip_(String(s.artist || '').trim(), 80),
+      videoId: /^[\w-]{11}$/.test(vid) ? vid : ''
+    };
+  }).filter(function (s) { return s.title; });
+  if (!items.length) throw appError_('登録する曲を選んでください');
+
+  ytResolve_(items);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const all = readAll_(SHEETS.FAVS, FAV_COLS);
+    const mine = all.rows.filter(function (r) { return normEmail_(r.obj.email) === sess.email; });
+    const have = {};
+    mine.forEach(function (r) { have[String(r.obj.videoId)] = true; });
+    let count = mine.length;
+    const now = new Date();
+    const rows = [], added = [], skipped = [];
+
+    items.forEach(function (s) {
+      if (!s.videoId) { skipped.push({ title: s.title, artist: s.artist, reason: '動画が見つかりません' }); return; }
+      if (have[s.videoId]) { skipped.push({ title: s.title, artist: s.artist, reason: '登録済み' }); return; }
+      if (count >= MAX_FAVS) { skipped.push({ title: s.title, artist: s.artist, reason: '登録上限' }); return; }
+      const obj = {
+        id: Utilities.getUuid(), email: sess.email, videoId: s.videoId, title: s.title, artist: s.artist,
+        keyShift: 0, memo: '', isOhako: false, createdAt: now, updatedAt: now
+      };
+      rows.push(toRow_(FAV_COLS, obj));
+      added.push(favOut_(obj));
+      have[s.videoId] = true;
+      count++;
+    });
+
+    if (rows.length) {
+      all.sh.getRange(all.sh.getLastRow() + 1, 1, rows.length, FAV_COLS.length).setValues(rows);
+    }
+    return { ok: true, added: added, skipped: skipped };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------
  * YouTube 検索
  * ------------------------------------------------------- */
+/** songs[i].videoId が空のものだけ並列検索して埋める */
+function ytResolve_(songs) {
+  const key = prop_('YOUTUBE_API_KEY');
+  if (!key) throw appError_('YOUTUBE_API_KEY が未設定です（管理者向け）');
+  const targets = songs.filter(function (s) { return !s.videoId; });
+  if (!targets.length) return songs;
+  const resps = UrlFetchApp.fetchAll(targets.map(function (s) {
+    return { url: ytSearchUrl_(s.title + ' ' + (s.artist || '') + ' カラオケ', 1, key), muteHttpExceptions: true };
+  }));
+  resps.forEach(function (r, i) {
+    if (r.getResponseCode() !== 200) return;
+    const items = JSON.parse(r.getContentText()).items || [];
+    if (items[0] && items[0].id && items[0].id.videoId) {
+      targets[i].videoId = items[0].id.videoId;
+      targets[i].videoTitle = decodeHtml_(items[0].snippet.title);
+    }
+  });
+  return songs;
+}
+
 function searchVideos_(req) {
   const q = String(req.q || '').trim().slice(0, 100);
   if (!q) throw appError_('検索ワードを入力してください');
