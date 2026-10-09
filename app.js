@@ -223,6 +223,7 @@ function savePrefs() {
   prefsTimer = setTimeout(() => {
     localStorage.setItem(CONFIG.PREF_KEY, JSON.stringify({
       ttsMode: state.ttsMode, musicVol: state.musicVol, preset: state.preset, fx: MicFx.p,
+      goEra: $('#sel-go-era')?.value || '', goVocal: $('#sel-go-vocal')?.value || '',
     }));
   }, 300);
 }
@@ -1240,28 +1241,36 @@ function renderSearch() {
     </li>`).join('');
 }
 
-function renderPickBar() {
-  const bar = $('#pick-bar');
-  const selectable = state.aiResults.filter(s => !s.registered);
-  const n = state.aiResults.filter(s => s.checked && !s.registered).length;
-  bar.hidden = state.resultMode !== 'ai' || !state.aiResults.length;
-  const btn = $('#btn-pick-add');
-  if (!btn.dataset.busy) {
-    btn.disabled = n === 0;
-    btn.textContent = n ? `チェックした${n}曲をマイリストに登録` : 'チェックした曲をマイリストに登録';
+/** 選択バー（AI選曲・お出かけ共通） */
+function updatePickBar(list, { bar, btn, all, visible }) {
+  const selectable = list.filter(s => !s.registered);
+  const n = list.filter(s => s.checked && !s.registered).length;
+  $(bar).hidden = !visible || !list.length;
+  const b = $(btn);
+  if (!b.dataset.busy) {
+    b.disabled = n === 0;
+    b.textContent = n ? `チェックした${n}曲をマイリストに登録` : 'チェックした曲をマイリストに登録';
   }
-  const all = $('#chk-pick-all');
-  all.disabled = selectable.length === 0;
-  all.checked = selectable.length > 0 && n === selectable.length;
+  const a = $(all);
+  a.disabled = selectable.length === 0;
+  a.checked = selectable.length > 0 && n === selectable.length;
 }
 
-async function registerChecked() {
-  const targets = state.aiResults.filter(s => s.checked && !s.registered);
+function renderPickBar() {
+  updatePickBar(state.aiResults, { bar: '#pick-bar', btn: '#btn-pick-add', all: '#chk-pick-all', visible: state.resultMode === 'ai' });
+}
+function renderGoPickBar() {
+  updatePickBar(state.suggestions, { bar: '#go-pick-bar', btn: '#btn-go-pick-add', all: '#chk-go-pick-all', visible: true });
+}
+
+/** チェックした曲をまとめてマイリストに登録 */
+async function registerSongs(list, btnSel, rerender) {
+  const targets = list.filter(s => s.checked && !s.registered);
   if (!targets.length) return;
-  const btn = $('#btn-pick-add');
+  const btn = $(btnSel);
   btn.dataset.busy = '1';
   btn.disabled = true;
-  btn.textContent = `${targets.length}曲の動画を探して登録中…`;
+  btn.textContent = `${targets.length}曲を登録中…`;
   try {
     const r = await withTimeout(api('addSongsToMylist', {
       items: targets.map(s => ({ title: s.title, artist: s.artist, videoId: s.videoId })),
@@ -1286,8 +1295,12 @@ async function registerChecked() {
     toast(err.message, 'error');
   } finally {
     delete btn.dataset.busy;
-    renderSearch();
+    rerender();
   }
+}
+
+function registerChecked() {
+  return registerSongs(state.aiResults, '#btn-pick-add', renderSearch);
 }
 
 /* 音声入力（話し終わったらAI選曲を自動実行） */
@@ -1374,6 +1387,10 @@ async function loadFavorites() {
     if (state.resultMode === 'ai') {
       state.aiResults.forEach(s => { if (isInMylist(s)) { s.registered = true; s.checked = false; } });
       renderSearch();
+    }
+    if (state.suggestions.length) {
+      state.suggestions.forEach(s => { if (isInMylist(s)) { s.registered = true; s.checked = false; } });
+      renderSuggestions();
     }
   } catch (err) {
     $('#fav-list').innerHTML = `<li class="empty">${esc(err.message)}</li>`;
@@ -1580,6 +1597,8 @@ function renderTicket(r) {
   $('#ticket-area').textContent = r.area || 'このあたり';
   $('#ticket-scene').textContent = r.scene ? `${r.scene}エリア` : '';
   $('#ticket-mood').textContent = r.mood || '';
+  $('#ticket-cond').hidden = !r.condition;
+  $('#ticket-cond').textContent = r.condition ? `条件：${r.condition}` : '';
   const t = $('#ticket');
   t.hidden = true;
   void t.offsetWidth; // アニメーションを毎回やり直す
@@ -1593,6 +1612,7 @@ async function runOutingFlow({ autoplay = false } = {}) {
   setGoButtons(true);
   $('#ticket').hidden = true;
   $('#suggest-list').innerHTML = '';
+  $('#go-pick-bar').hidden = true;
   setOutingStatus('');
   try {
     setStep('locate');
@@ -1606,6 +1626,8 @@ async function runOutingFlow({ autoplay = false } = {}) {
       character: state.character,
       withAudio: state.ttsMode === 'gemini',
       note: $('#outing-note').value.trim(),
+      era: $('#sel-go-era').value,
+      vocal: $('#sel-go-vocal').value,
     }), 45000);
     // 推理→選曲の表示を少し進める（サーバーは1回の通信で両方やる）
     const stepTimer = setTimeout(() => setStep('pick'), 2500);
@@ -1613,7 +1635,8 @@ async function runOutingFlow({ autoplay = false } = {}) {
     clearTimeout(stepTimer);
     setNavi(false);
 
-    state.suggestions = r.songs || [];
+    state.suggestions = (r.songs || []).map(x => ({ ...x, checked: false, registered: isInMylist(x) }));
+    state.goCondition = r.condition || '';
     showArrival(r);
     renderTicket(r);
     renderSuggestions();
@@ -1657,19 +1680,21 @@ function renderSuggestions() {
   const list = $('#suggest-list');
   const firstPlayable = state.suggestions.findIndex(s => s.videoId);
   list.innerHTML = state.suggestions.map((s, i) => `
-    <li class="station${i === firstPlayable ? ' is-first' : ''}" data-idx="${i}">
+    <li class="station${i === firstPlayable ? ' is-first' : ''}${s.checked ? ' is-checked' : ''}" data-idx="${i}">
       <span class="station-dot" aria-hidden="true"></span>
-      ${i === firstPlayable ? '<span class="first-badge">1曲目</span>' : ''}
-      <p class="song-title">${esc(s.title)}</p>
-      <p class="song-sub">${esc(s.artist)}${isInMylist(s) ? '<span class="done-chip">登録済み</span>' : ''}</p>
+      ${i === firstPlayable ? '<span class="first-badge" style="margin-left:32px">1曲目</span>' : ''}
+      <label class="station-check">
+        <input type="checkbox" ${s.checked ? 'checked' : ''} ${s.registered ? 'disabled' : ''}>
+        <span class="song-title">${esc(s.title)}</span>
+      </label>
+      <p class="song-sub">${esc(s.artist)}${s.year ? `<span>${esc(s.year)}年</span>` : ''}${s.vocal ? `<span class="vocal-chip">${esc(s.vocal)}</span>` : ''}${s.registered ? '<span class="done-chip">登録済み</span>' : ''}</p>
       <p class="song-reason">${esc(s.reason)}</p>
       <div class="song-actions">
-        ${s.videoId
-          ? `<button class="btn btn-sm btn-primary" data-act="sing">曲紹介から歌う</button>
-             <button class="btn btn-sm" data-act="fav">マイリストへ</button>`
-          : '<button class="btn btn-sm" data-act="search">YouTubeで探す</button>'}
+        <button class="btn btn-sm btn-primary" data-act="sing">曲紹介から歌う</button>
+        <button class="btn btn-sm btn-ghost" data-act="search">YouTubeで探す</button>
       </div>
     </li>`).join('');
+  renderGoPickBar();
 }
 
 function bindOuting() {
@@ -1683,13 +1708,36 @@ function bindOuting() {
   $('#btn-empty-go').addEventListener('click', go);
   $('#btn-outing').addEventListener('click', () => { AC.resume().catch(() => {}); runOutingFlow(); });
 
-  $('#suggest-list').addEventListener('click', e => {
+  $('#suggest-list').addEventListener('change', e => {
+    const cb = e.target.closest('input[type="checkbox"]');
+    if (!cb) return;
+    const li = cb.closest('li');
+    const s = state.suggestions[Number(li.dataset.idx)];
+    if (!s) return;
+    s.checked = cb.checked;
+    li.classList.toggle('is-checked', cb.checked);
+    renderGoPickBar();
+  });
+
+  $('#chk-go-pick-all').addEventListener('change', e => {
+    state.suggestions.forEach(s => { if (!s.registered) s.checked = e.target.checked; });
+    renderSuggestions();
+  });
+  $('#btn-go-pick-add').addEventListener('click', () => registerSongs(state.suggestions, '#btn-go-pick-add', renderSuggestions));
+
+  ['#sel-go-era', '#sel-go-vocal'].forEach(id => $(id).addEventListener('change', savePrefs));
+
+  $('#suggest-list').addEventListener('click', async e => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
     const s = state.suggestions[Number(btn.closest('li').dataset.idx)];
     if (!s) return;
-    if (btn.dataset.act === 'sing') { setSong({ videoId: s.videoId, title: s.title, artist: s.artist }); startWithIntro(); }
-    if (btn.dataset.act === 'fav') openFavDialog({ videoId: s.videoId, title: s.title, artist: s.artist, keyShift: 0, memo: '', isOhako: false });
+    if (btn.dataset.act === 'sing') {
+      const ok = await ensureVideo(s, btn);
+      if (!ok) return;
+      setSong({ videoId: s.videoId, title: s.title, artist: s.artist });
+      startWithIntro();
+    }
     if (btn.dataset.act === 'search') {
       selectTab('search');
       const q = `${s.title} ${s.artist}`;
@@ -1862,6 +1910,8 @@ async function init() {
   if (typeof prefs.musicVol === 'number') state.musicVol = prefs.musicVol;
   if (prefs.preset) state.preset = prefs.preset;
   if (prefs.fx) Object.assign(MicFx.p, prefs.fx);
+  if (prefs.goEra) $('#sel-go-era').value = prefs.goEra;
+  if (prefs.goVocal) $('#sel-go-vocal').value = prefs.goVocal;
 
   setupPwToggles();
   bindAuth();

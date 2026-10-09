@@ -580,6 +580,10 @@ input[type="range"] { accent-color: var(--amber); height: 28px; }
 @keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 .outing-status { margin: 10px 0 0; color: var(--amber); font-size: 0.9rem; min-height: 1.2em; }
 
+.go-conditions { margin-top: 14px; }
+.go-cond-title { margin: 0; font-weight: 700; font-size: 0.92rem; }
+.go-conditions .filters { margin-top: 6px; margin-bottom: 12px; }
+
 /* きっぷ */
 .ticket {
   position: relative;
@@ -604,6 +608,7 @@ input[type="range"] { accent-color: var(--amber); height: 28px; }
 .ticket-scene { margin: 2px 0 0; font-weight: 700; color: #8A4B12; }
 .ticket-mood { margin: 10px 0 0; font-size: 0.9rem; }
 .ticket-mood span { font-weight: 700; }
+.ticket-cond { margin: 2px 0 0; font-size: 0.85rem; font-weight: 700; color: #8A4B12; padding-right: 70px; }
 .ticket-stamp {
   position: absolute;
   right: 14px;
@@ -653,6 +658,12 @@ input[type="range"] { accent-color: var(--amber); height: 28px; }
   color: #fff;
 }
 .station .song-actions { margin-top: 8px; }
+.station-check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.station-check input { flex: 0 0 auto; width: 22px; height: 22px; margin-top: 3px; accent-color: var(--amber); }
+.station-check input:disabled { opacity: .4; }
+.station.is-checked .song-title { color: var(--amber); }
+.station .song-sub, .station .song-reason { padding-left: 32px; }
+.station .song-actions { padding-left: 32px; }
 .song-reason { margin: 4px 0 0; font-size: 0.82rem; color: var(--cream); opacity: .85; }
 
 /* スクリーン空状態の「行こう！」 */

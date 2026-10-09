@@ -21,7 +21,7 @@
 
 const APP_NAME = 'UTAGE';
 // サーバー側のバージョン：Code.gs を直したら上げて「新バージョン」で再デプロイ
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const APP_UPDATED = '2026-10-09';
 const SHEETS = { USERS: 'users', FAVS: 'favorites' };
 const USER_COLS = ['email', 'passwordHash', 'salt', 'status', 'mustReset', 'nickname', 'character',
@@ -463,6 +463,9 @@ function suggestByLocation_(req, sess) {
   const season = month <= 2 || month === 12 ? '冬' : month <= 5 ? '春' : month <= 8 ? '夏' : '秋';
   const dateStr = Utilities.formatDate(now, 'Asia/Tokyo', 'M月d日 H時m分');
   const note = clip_(String(req.note || ''), 80);
+  const era = ERAS[req.era] || '';
+  const vocal = VOCALS[req.vocal] || '';
+  const count = 8;
 
   const sys = 'あなたはカラオケアプリ「UTAGE」の案内役キャラクター「' + p.name + '」です。\n'
     + '人物設定：' + p.persona + '\n'
@@ -472,13 +475,20 @@ function suggestByLocation_(req, sess) {
     + '- 緯度経度（概算）：' + lat.toFixed(3) + ', ' + lng.toFixed(3) + '\n'
     + '- 移動速度：' + (speed === null ? '不明' : speed + 'km/h') + '\n'
     + '- 日時：' + dateStr + '（' + season + '）\n'
-    + '- 本人のひとこと：' + (note || 'なし') + '\n\n'
+    + '- 本人のひとこと：' + (note || 'なし') + '\n'
+    + '- 年代の指定：' + (era || '指定なし') + '\n'
+    + '- ボーカルの指定：' + (vocal || '指定なし') + '\n\n'
     + 'この場所が「海沿い・山道・街中・田園・観光地や旅先・自宅周辺・移動中の車内」などのどれに近いかを推定し、'
-    + 'その場のムードにぴったりの、日本で有名なカラオケ定番曲を5曲選んでください。実在する曲名と歌手名を正確に書き、年代はばらけさせること。\n'
+    + 'その場のムードにぴったりの、日本で有名なカラオケ定番曲を' + count + '曲選んでください。実在する曲名と歌手名を正確に書くこと。\n'
+    + (era ? '年代の指定は必ず守ること（発売年がその年代の曲だけ）。\n' : '年代はばらけさせること。\n')
+    + (vocal ? 'ボーカルの指定は必ず守ること。\n' : '')
+    + 'commentでは、年代やボーカルの指定があれば一言触れてよい。\n'
     + 'area：「横浜・みなとみらい周辺」程度の大まかな地名（番地や建物名は書かない）\n'
     + 'scene：推定した環境（例：海沿い）\n'
     + 'mood：その場のムードを一言で\n'
     + 'comment：キャラクターの口調で、場所の雰囲気に触れながら選曲を紹介するセリフ（70文字以内、読み上げ用、絵文字なし）\n'
+    + 'songs[].year：発売年（西暦の数値）\n'
+    + 'songs[].vocal：「女性」「男性」「デュエット」「グループ」のいずれか\n'
     + 'songs[].reason：その曲を選んだ理由（30文字以内）';
 
   const schema = {
@@ -492,8 +502,11 @@ function suggestByLocation_(req, sess) {
         type: 'ARRAY',
         items: {
           type: 'OBJECT',
-          properties: { title: { type: 'STRING' }, artist: { type: 'STRING' }, reason: { type: 'STRING' } },
-          required: ['title', 'artist', 'reason']
+          properties: {
+            title: { type: 'STRING' }, artist: { type: 'STRING' }, year: { type: 'INTEGER' },
+            vocal: { type: 'STRING' }, reason: { type: 'STRING' }
+          },
+          required: ['title', 'artist', 'year', 'vocal', 'reason']
         }
       }
     },
@@ -506,12 +519,15 @@ function suggestByLocation_(req, sess) {
   } catch (e) {
     throw appError_('選曲の生成に失敗しました。もう一度お試しください');
   }
-  const songs = (out.songs || []).slice(0, 5).map(function (s) {
-    return { title: clip_(s.title, 80), artist: clip_(s.artist, 40), reason: clip_(s.reason, 60) };
+  const songs = (out.songs || []).slice(0, count).map(function (s) {
+    return {
+      title: clip_(s.title, 80), artist: clip_(s.artist, 40), year: Number(s.year) || '',
+      vocal: clip_(s.vocal, 10), reason: clip_(s.reason, 60)
+    };
   });
 
-  // YouTube でカラオケ動画を並列検索（キー未設定でも提案だけは返す）
-  try { ytResolve_(songs); } catch (e) { console.warn('ytResolve', e); }
+  // YouTube APIの節約：自動再生用に先頭2曲だけ動画を探す（残りは歌う・登録の時に探す）
+  try { ytResolve_(songs.slice(0, 2)); } catch (e) { console.warn('ytResolve', e); }
 
   const comment = cleanLine_(out.comment || '');
   let audio = null;
@@ -521,7 +537,7 @@ function suggestByLocation_(req, sess) {
   // 位置情報はスプレッドシートに保存しない
   return {
     ok: true, area: clip_(out.area, 40), scene: clip_(out.scene, 20), mood: clip_(out.mood, 30),
-    comment: comment, songs: songs, audio: audio
+    comment: comment, songs: songs, audio: audio, condition: [era, vocal].filter(String).join('／')
   };
 }
 
