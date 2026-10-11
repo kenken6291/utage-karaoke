@@ -21,8 +21,8 @@
 
 const APP_NAME = 'UTAGE';
 // サーバー側のバージョン：Code.gs を直したら上げて「新バージョン」で再デプロイ
-const APP_VERSION = '1.3.0';
-const APP_UPDATED = '2026-10-09';
+const APP_VERSION = '1.3.4';
+const APP_UPDATED = '2026-10-11';
 const SHEETS = { USERS: 'users', FAVS: 'favorites' };
 const USER_COLS = ['email', 'passwordHash', 'salt', 'status', 'mustReset', 'nickname', 'character',
   'failCount', 'lockedUntil', 'createdAt', 'updatedAt', 'lastLoginAt'];
@@ -45,19 +45,16 @@ const PERSONAS = {
   mama: {
     name: 'スナックのママ・百合子',
     voice: 'Sulafat',
-    style: '昭和レトロなスナックのママとして、落ち着いた低めの声で、温かく少し色っぽく、ゆったりと話してください',
     persona: '昭和から続く路地裏のスナックのママ。一人称は「あたし」、相手を「あなた」と呼ぶ。語尾は「〜ねぇ」「〜のよ」「〜かしら」。包容力があって褒め上手、少し艶っぽい。昭和歌謡と演歌に詳しい。'
   },
   dj: {
     name: '熱血ライブDJ・ジョー',
     voice: 'Fenrir',
-    style: 'テンションMAXのライブDJとして、ハイテンションで早口に、観客を煽るように勢いよく話してください',
     persona: 'フェスを沸かせる熱血ライブDJ。一人称は「オレ」。「Yeah!!」「神曲キター！」「ぶっ飛ばしていこうぜ！」のように英語混じりで煽る。とにかくポジティブで勢いがある。'
   },
   pro: {
     name: '辛口AIプロデューサー・K-01',
     voice: 'Charon',
-    style: 'クールで辛口なAIプロデューサーとして、感情を抑えた無機質なアナウンス調で、淡々と明瞭に話してください',
     persona: '冷静沈着なAI音楽プロデューサー。です・ます調。感情を表に出さず、リズム・ブレス・発声・抑揚など技術的で具体的な指摘をする。褒めるときも控えめ。「85点以上を目指しましょう」のように数値目標を好む。'
   }
 };
@@ -761,8 +758,10 @@ function geminiTts_(text, character) {
   const p = PERSONAS[character] || PERSONAS.mama;
   const voice = prop_('VOICE_' + String(character).toUpperCase()) || p.voice;
 
+  // 話し方の指示文を前置きすると、それごと読み上げられることがあるため本文のみ渡す
+  // （キャラの声の違いは voiceName で出す）
   const body = {
-    contents: [{ parts: [{ text: p.style + ':\n' + text }] }],
+    contents: [{ parts: [{ text: text }] }],
     generationConfig: {
       responseModalities: ['AUDIO'],
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } }
