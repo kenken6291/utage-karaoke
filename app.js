@@ -58,6 +58,8 @@ const PRESETS = {
   room:    { time: 0.20, feedback: 0.38, echoMix: 0.45, reverbMix: 0.30, reverbSec: 1.6, tone: 3800 },
   stadium: { time: 0.38, feedback: 0.52, echoMix: 0.50, reverbMix: 0.55, reverbSec: 3.8, tone: 2600 },
   off:     { time: 0.20, feedback: 0.00, echoMix: 0.00, reverbMix: 0.00, reverbSec: 1.0, tone: 6000 },
+  // 運行モードのトンネル演出用（画面のボタンには出さない）
+  tunnel:  { time: 0.30, feedback: 0.60, echoMix: 0.55, reverbMix: 0.75, reverbSec: 3.2, tone: 2200 },
 };
 
 const TRIGGER_WORDS = /(行こう|いこう|イコウ|いこー|行こー)/;
@@ -1072,6 +1074,7 @@ async function finishSong() {
   const s = state.session;
   state.session = null;
   if (!s) return;
+  const songSnap = state.song ? { ...state.song } : null;
   const result = computeScore(s);
   const card = $('#score-card');
   card.hidden = false;
@@ -1088,6 +1091,8 @@ async function finishSong() {
     $('#score-detail').textContent = `歌っていた割合 ${result.voicedPct}%／声量の安定感：${result.stability}`;
   }
   await Voice.say(line.text, line.audio);
+  // 運行モード：駅ごとの記録・アナウンス・次の曲へのカウントダウン
+  if (window.Tabi) Tabi.onSongFinished(songSnap, result);
 }
 
 /* ---------------------------------------------------------
@@ -1665,6 +1670,7 @@ async function runOutingFlow({ autoplay = false } = {}) {
       note: $('#outing-note').value.trim(),
       era: $('#sel-go-era').value,
       vocal: $('#sel-go-vocal').value,
+      ...(window.Tabi ? Tabi.requestExtras() : {}),
     }), 45000);
     // 推理→選曲の表示を少し進める（サーバーは1回の通信で両方やる）
     const stepTimer = setTimeout(() => setStep('pick'), 2500);

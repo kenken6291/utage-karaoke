@@ -21,8 +21,8 @@
 
 const APP_NAME = 'UTAGE';
 // サーバー側のバージョン：Code.gs を直したら上げて「新バージョン」で再デプロイ
-const APP_VERSION = '1.3.4';
-const APP_UPDATED = '2026-10-11';
+const APP_VERSION = '1.4.0';
+const APP_UPDATED = '2026-10-25';
 const SHEETS = { USERS: 'users', FAVS: 'favorites' };
 const USER_COLS = ['email', 'passwordHash', 'salt', 'status', 'mustReset', 'nickname', 'character',
   'failCount', 'lockedUntil', 'createdAt', 'updatedAt', 'lastLoginAt'];
@@ -95,7 +95,9 @@ function doPost(e) {
     searchVideos: searchVideos_,
     aiPickSongs: aiPickSongs_,
     resolveVideos: resolveVideos_,
-    addSongsToMylist: addSongsToMylist_
+    addSongsToMylist: addSongsToMylist_,
+    tabiPlace: tabiPlace_,
+    tabiLine: tabiLine_
   };
 
   try {
@@ -463,6 +465,15 @@ function suggestByLocation_(req, sess) {
   const era = ERAS[req.era] || '';
   const vocal = VOCALS[req.vocal] || '';
   const count = 8;
+  // 運行モード（移動中の連続選曲）の情報
+  const tr = req.travel || null;
+  const exclude = (Array.isArray(req.exclude) ? req.exclude : []).slice(-15)
+    .map(function (x) { return clip_(String(x || ''), 60); }).filter(String);
+  const travelTxt = tr
+    ? '- 運行モード中：' + clip_(tr.mode, 20) + (tr.kmh !== null && tr.kmh !== undefined ? '（約' + Number(tr.kmh) + 'km/h）' : '')
+      + '、出発から' + (Number(tr.km) || 0) + 'km・' + (Number(tr.minutes) || 0) + '分、これまで' + (Number(tr.songs) || 0) + '曲'
+      + (tr.tunnel ? '、いまトンネルの中' : '') + '\n'
+    : '';
 
   const sys = 'あなたはカラオケアプリ「UTAGE」の案内役キャラクター「' + p.name + '」です。\n'
     + '人物設定：' + p.persona + '\n'
@@ -474,12 +485,17 @@ function suggestByLocation_(req, sess) {
     + '- 日時：' + dateStr + '（' + season + '）\n'
     + '- 本人のひとこと：' + (note || 'なし') + '\n'
     + '- 年代の指定：' + (era || '指定なし') + '\n'
-    + '- ボーカルの指定：' + (vocal || '指定なし') + '\n\n'
+    + '- ボーカルの指定：' + (vocal || '指定なし') + '\n'
+    + travelTxt
+    + (exclude.length ? '- すでに歌った曲（選ばないこと）：' + exclude.join('、') + '\n' : '')
+    + '\n'
     + 'この場所が「海沿い・山道・街中・田園・観光地や旅先・自宅周辺・移動中の車内」などのどれに近いかを推定し、'
     + 'その場のムードにぴったりの、日本で有名なカラオケ定番曲を' + count + '曲選んでください。実在する曲名と歌手名を正確に書くこと。\n'
     + (era ? '年代の指定は必ず守ること（発売年がその年代の曲だけ）。\n' : '年代はばらけさせること。\n')
     + (vocal ? 'ボーカルの指定は必ず守ること。\n' : '')
     + 'commentでは、年代やボーカルの指定があれば一言触れてよい。\n'
+    + (tr ? '運行モード中なので、移動ペースに曲のテンポを合わせること（停車中や徒歩はゆったり、ドライブは軽快、高速や新幹線は疾走感）。'
+      + '旅の途中である流れを意識し、commentは「次の停車駅は」のような車内アナウンス風にしてよい。\n' : '')
     + 'area：「横浜・みなとみらい周辺」程度の大まかな地名（番地や建物名は書かない）\n'
     + 'scene：推定した環境（例：海沿い）\n'
     + 'mood：その場のムードを一言で\n'
@@ -535,6 +551,129 @@ function suggestByLocation_(req, sess) {
   return {
     ok: true, area: clip_(out.area, 40), scene: clip_(out.scene, 20), mood: clip_(out.mood, 30),
     comment: comment, songs: songs, audio: audio, condition: [era, vocal].filter(String).join('／')
+  };
+}
+
+/* ---------------------------------------------------------
+ * UTAGE号 運行モード
+ *  tabiPlace：現在地 → 都道府県・市区町村（Gemini不使用。位置は保存しない）
+ *  tabiLine ：駅に着いた時のご当地アナウンス／終着駅の称号と講評
+ * ------------------------------------------------------- */
+function tabiPlace_(req, sess) {
+  const lat = Number(req.lat), lng = Number(req.lng);
+  if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    throw appError_('位置情報が正しくありません');
+  }
+  // 約100m四方でキャッシュ（逆ジオコーディングの回数節約）
+  const cache = CacheService.getScriptCache();
+  const ckey = 'geo_' + lat.toFixed(3) + '_' + lng.toFixed(3);
+  const hit = cache.get(ckey);
+  if (hit) return JSON.parse(hit);
+
+  let pref = '', city = '', ward = '', area2 = '';
+  try {
+    const g = Maps.newGeocoder().setLanguage('ja').reverseGeocode(lat, lng);
+    const results = (g && g.status === 'OK' && g.results) ? g.results : [];
+    results.forEach(function (r) {
+      (r.address_components || []).forEach(function (c) {
+        const ty = c.types || [];
+        const name = String(c.long_name || '');
+        if (!pref && ty.indexOf('administrative_area_level_1') >= 0) pref = name;
+        if (!city && ty.indexOf('locality') >= 0) city = name;
+        if (!area2 && ty.indexOf('administrative_area_level_2') >= 0) area2 = name;
+        if (!ward && (ty.indexOf('ward') >= 0 || (ty.indexOf('sublocality_level_1') >= 0 && /区$/.test(name)))) ward = name;
+      });
+    });
+  } catch (e) {
+    console.warn('tabiPlace', e);
+    throw appError_('現在地の地名を取得できませんでした');
+  }
+  if (!city) city = area2;
+  if (ward === city) ward = '';
+  const out = { ok: true, pref: clip_(pref, 10), city: clip_(city, 20), ward: clip_(ward, 20) };
+  cache.put(ckey, JSON.stringify(out), 21600);
+  return out;
+}
+
+function tabiLine_(req, sess) {
+  checkAiQuota_(sess.email);
+  const ch = PERSONAS[req.character] ? req.character : 'mama';
+  const p = PERSONAS[ch];
+  const nickname = sess.nickname || 'お客';
+  const sys = 'あなたはカラオケアプリ「UTAGE」の案内役キャラクター「' + p.name + '」です。\n'
+    + '人物設定：' + p.persona + '\n'
+    + 'いまはカラオケしながら移動する「UTAGE号」の車掌も務めています。\n'
+    + 'セリフは読み上げられるので、かっこ書き・ト書き・絵文字・改行を使わない自然な話し言葉にする。';
+
+  let out, text = '';
+  if (req.kind === 'summary') {
+    const trip = req.trip || {};
+    const stations = (Array.isArray(trip.stations) ? trip.stations : []).slice(0, 30).map(function (s) {
+      const songs = (Array.isArray(s.songs) ? s.songs : []).slice(0, 10).map(function (x) {
+        return clip_(x.title, 40) + (x.score !== null && x.score !== undefined && x.score !== '' ? '（' + x.score + '点）' : '');
+      });
+      return clip_(s.name, 30) + (songs.length ? '：' + songs.join('、') : '：歌わず通過');
+    });
+    const user = nickname + 'さんがUTAGE号の旅を終えました。\n'
+      + '- 走行距離：' + (Number(trip.km) || 0) + 'km\n'
+      + '- 運行時間：' + (Number(trip.minutes) || 0) + '分\n'
+      + '- 最高速度：' + (Number(trip.maxKmh) || 0) + 'km/h\n'
+      + '- 旅ポイント：' + (Number(trip.points) || 0) + '\n'
+      + '- 停車駅と歌った曲：\n' + (stations.length ? stations.join('\n') : '記録なし') + '\n\n'
+      + 'title：この旅に付ける称号。列車の愛称風に「〇〇号」で終わる12文字以内（例：多摩川ほろ酔い急行号）。地名か歌った曲の雰囲気を織り込む。\n'
+      + 'line：キャラクターの口調で旅をふりかえる講評。印象的な駅や曲に一つ触れ、最後は次の旅へ誘う。100文字以内。';
+    const schema = {
+      type: 'OBJECT',
+      properties: { title: { type: 'STRING' }, line: { type: 'STRING' } },
+      required: ['title', 'line']
+    };
+    try {
+      out = JSON.parse(geminiText_(sys, user, { json: true, schema: schema, temperature: 1.0 }));
+    } catch (e) {
+      throw appError_('旅のふりかえりを作れませんでした');
+    }
+    text = cleanLine_(out.line || '');
+    let audio = null;
+    if (req.withAudio && text) { try { audio = geminiTts_(text, ch); } catch (e) { console.warn('tts', e); } }
+    return { ok: true, title: clip_(cleanLine_(out.title || ''), 20), text: text, audio: audio };
+  }
+
+  // welcome（駅に到着）
+  const pl = req.place || {};
+  const pv = req.prev || null;
+  const placeTxt = clip_(String(pl.pref || '') + String(pl.city || '') + String(pl.ward || ''), 40);
+  if (!placeTxt) throw appError_('地名がありません');
+  const situation = req.first
+    ? '運行開始の始発駅です。発車のあいさつをする。'
+    : req.crossedPref
+      ? '県境を越えて「' + clip_(pv && pv.pref, 10) + '」から「' + clip_(pl.pref, 10) + '」に入りました。県境突破を大げさに祝う。'
+      : '「' + clip_(pv ? String(pv.city || '') : '', 20) + '」から「' + clip_(pl.city, 20) + '」に入りました。';
+  const user = '現在地：' + placeTxt + '\n'
+    + '状況：' + situation + '\n'
+    + '移動ペース：' + clip_(req.mode, 20) + '\n\n'
+    + 'line：車内アナウンス風に、この市区町村の名物・名所・ちょっとした豆知識を一つ入れたセリフ（60文字以内）。不確かな情報は書かない。\n'
+    + 'yomi：市区町村名（区があれば区まで）のひらがなの読み\n'
+    + 'localTitle／localArtist：この土地にゆかりのある、実在する有名なカラオケ曲（ご当地ソング）。確実なものが無ければ空文字。';
+  const schema = {
+    type: 'OBJECT',
+    properties: {
+      line: { type: 'STRING' }, yomi: { type: 'STRING' },
+      localTitle: { type: 'STRING' }, localArtist: { type: 'STRING' }
+    },
+    required: ['line', 'yomi', 'localTitle', 'localArtist']
+  };
+  try {
+    out = JSON.parse(geminiText_(sys, user, { json: true, schema: schema, temperature: 0.9 }));
+  } catch (e) {
+    throw appError_('ご当地アナウンスを作れませんでした');
+  }
+  text = cleanLine_(out.line || '');
+  let audio = null;
+  if (req.withAudio && text) { try { audio = geminiTts_(text, ch); } catch (e) { console.warn('tts', e); } }
+  const localTitle = clip_(String(out.localTitle || '').trim(), 60);
+  return {
+    ok: true, text: text, audio: audio, yomi: clip_(String(out.yomi || '').replace(/\s/g, ''), 30),
+    local: localTitle ? { title: localTitle, artist: clip_(String(out.localArtist || '').trim(), 40) } : null
   };
 }
 

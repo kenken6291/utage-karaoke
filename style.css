@@ -857,3 +857,335 @@ input[type="range"] { accent-color: var(--amber); height: 28px; }
   .btn-go.is-listening::before, .fab-go.is-listening::before { animation: none; opacity: .9; }
   .go-ov-ico { animation: none; }
 }
+
+/* =========================================================
+ * UTAGE号 運行モード（v1.4.0）
+ * ========================================================= */
+
+/* ---------- 運転台メーター（スクリーン左上） ---------- */
+.cab-hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  display: grid;
+  gap: 0;
+  padding: 6px 12px 7px;
+  border-radius: var(--radius-sm);
+  background: rgba(28, 8, 23, 0.72);
+  border: 1px solid rgba(123, 230, 238, 0.35);
+  pointer-events: none;
+  line-height: 1.25;
+}
+.cab-hud p { margin: 0; }
+.cab-speed { display: flex; align-items: baseline; gap: 4px; }
+.cab-speed b {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.3rem, 3.6vw, 2rem);
+  color: var(--telop);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.2ch;
+  text-align: right;
+}
+.cab-speed small { font-size: 0.7rem; color: var(--mute); }
+.cab-mode { font-size: 0.75rem; font-weight: 700; color: var(--cream); }
+.cab-place { font-size: 0.72rem; color: var(--amber); max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cab-hud.is-tunnel { border-color: var(--amber); animation: tunnel-blink 1.4s ease-in-out infinite; }
+@keyframes tunnel-blink { 50% { background: rgba(28, 8, 23, 0.92); } }
+
+.cab-flash {
+  position: absolute;
+  left: 50%;
+  bottom: 14%;
+  z-index: 6;
+  margin: 0;
+  padding: 6px 16px;
+  border-radius: 99px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: clamp(0.8rem, 2vw, 1rem);
+  color: var(--ink);
+  background: var(--amber);
+  box-shadow: 0 4px 0 #A86A1C;
+  pointer-events: none;
+}
+.cab-flash.is-pop { animation: flash-pop 3.8s ease both; }
+@keyframes flash-pop {
+  0% { opacity: 0; transform: translate(-50%, 16px) scale(.8); }
+  10%, 80% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}
+
+/* ---------- 駅名標 ---------- */
+.eki-sign {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  grid-template-columns: minmax(0, min(440px, 88%));
+  padding: 16px;
+  background: rgba(16, 4, 13, 0.55);
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+.eki-sign.is-in { opacity: 1; }
+.eki-board {
+  position: relative;
+  width: 100%;
+  padding: 12px 0 0;
+  text-align: center;
+  color: #1E1A16;
+  background: #FBF8F0;
+  border-radius: 6px;
+  border: 3px solid #CFC6B4;
+  box-shadow: 0 14px 30px -10px rgba(0, 0, 0, .7);
+  overflow: hidden;
+  transform: translateX(110%);
+  transition: transform .55s cubic-bezier(.2, 1.1, .3, 1);
+}
+.eki-sign.is-in .eki-board { transform: none; }
+.eki-board p { margin: 0; }
+.eki-kicker { font-size: 0.78rem; font-weight: 700; color: #8A4B12; letter-spacing: .1em; }
+.eki-name {
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 6vw, 2.8rem);
+  line-height: 1.15;
+  padding: 0 12px;
+  overflow-wrap: anywhere;
+}
+.eki-ward { font-family: var(--font-display); font-size: clamp(0.9rem, 2.6vw, 1.2rem); color: #3A332C; }
+.eki-yomi { min-height: 1.4em; font-size: clamp(0.8rem, 2.2vw, 1rem); color: #5A5048; letter-spacing: .3em; }
+.eki-band {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--amber);
+}
+.eki-prev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eki-next { flex: 0 0 auto; }
+.eki-sign.is-border .eki-band { background: var(--rose); color: #fff; }
+.eki-badge {
+  margin: 0;
+  padding: 4px 14px;
+  border: 3px solid #fff;
+  border-radius: 8px;
+  font-family: var(--font-display);
+  font-size: clamp(1rem, 3vw, 1.4rem);
+  color: #fff;
+  background: var(--rose);
+  transform: rotate(-4deg);
+  animation: pop .5s .35s cubic-bezier(.2, 1.6, .4, 1) both;
+}
+.eki-pt { margin: 0; min-height: 1.3em; font-weight: 700; color: var(--amber); text-shadow: 0 2px 0 var(--ink); }
+.eki-local {
+  border: 0;
+  border-radius: 99px;
+  padding: 8px 18px;
+  font-weight: 700;
+  color: var(--velvet);
+  background: var(--telop);
+  cursor: pointer;
+}
+/* 歌っている最中は右上に小さく（歌詞の邪魔をしない） */
+.eki-sign.is-compact {
+  inset: 10px 10px auto auto;
+  display: block;
+  padding: 0;
+  background: none;
+  pointer-events: none;
+}
+.eki-sign.is-compact .eki-ward { font-size: 0.75rem; }
+.eki-sign.is-compact .eki-board { width: 210px; padding-top: 6px; border-width: 2px; }
+.eki-sign.is-compact .eki-name { font-size: 1.25rem; }
+.eki-sign.is-compact .eki-kicker,
+.eki-sign.is-compact .eki-yomi { font-size: 0.65rem; }
+.eki-sign.is-compact .eki-band { margin-top: 4px; padding: 3px 8px; font-size: 0.68rem; }
+.eki-sign.is-compact .eki-badge { position: absolute; left: -12px; top: -10px; padding: 1px 8px; font-size: 0.8rem; border-width: 2px; }
+.eki-sign.is-compact .eki-pt,
+.eki-sign.is-compact .eki-local { display: none; }
+
+/* ---------- 次の停車駅カウントダウン ---------- */
+.next-call {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding: 16px;
+  text-align: center;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .25) 0 2px, transparent 2px 4px),
+    #120610;
+}
+.next-call p { margin: 0; }
+.next-call-text { font-weight: 700; color: var(--mute); }
+.next-call-place { font-family: var(--font-display); font-size: clamp(1rem, 3vw, 1.5rem); color: var(--amber); }
+.next-call-num {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 12vw, 6rem);
+  line-height: 1.1;
+  color: var(--telop);
+  font-variant-numeric: tabular-nums;
+}
+.next-call-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+/* ---------- サイドパネル：運行モード ---------- */
+.unko {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: rgba(123, 230, 238, 0.06);
+  border: 1px solid rgba(123, 230, 238, 0.22);
+}
+.unko .check { margin-top: 10px; }
+.btn-unko {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: var(--radius);
+  text-align: left;
+  color: var(--ink);
+  background: linear-gradient(90deg, var(--telop) 0 10px, #CFF6F8 10px);
+  box-shadow: 0 5px 0 #3E9AA2;
+  cursor: pointer;
+}
+.btn-unko:active { transform: translateY(4px); box-shadow: 0 1px 0 #3E9AA2; }
+.unko-btn-main { font-family: var(--font-display); font-size: 1.15rem; line-height: 1.3; }
+.unko-btn-sub { font-size: 0.8rem; font-weight: 700; opacity: .75; }
+.btn-unko.is-running { color: #fff; background: linear-gradient(90deg, var(--amber) 0 10px, var(--rose) 10px); box-shadow: 0 5px 0 #9C2F58; }
+.btn-unko.is-running:active { box-shadow: 0 1px 0 #9C2F58; }
+#btn-unko-resume { margin-top: 10px; }
+.unko-desc { margin: 10px 0 0; font-size: 0.85rem; color: var(--cream); opacity: .85; }
+.unko-safety { margin: 8px 0 0; font-size: 0.78rem; color: var(--amber); }
+
+.unko-live { margin-top: 14px; }
+.unko-meter { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.unko-meter p { margin: 0; }
+.unko-speed b {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 2.4rem;
+  line-height: 1;
+  color: var(--telop);
+  font-variant-numeric: tabular-nums;
+}
+.unko-speed small { margin-left: 4px; color: var(--mute); }
+.unko-mode { font-weight: 700; }
+.unko-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0 0; }
+.unko-stats div { padding: 6px 4px; text-align: center; border-radius: var(--radius-sm); background: rgba(246, 234, 219, 0.05); }
+.unko-stats dt { font-size: 0.7rem; color: var(--mute); }
+.unko-stats dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.unko-route-title { margin: 14px 0 0; font-weight: 700; font-size: 0.9rem; }
+.unko-route { list-style: none; margin: 8px 0 0; padding: 0 0 0 4px; }
+.unko-route-empty { color: var(--mute); font-size: 0.85rem; }
+.unko-st { position: relative; padding: 0 0 14px 28px; }
+.unko-st::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 12px;
+  bottom: -4px;
+  width: 3px;
+  background: var(--telop);
+  opacity: .5;
+}
+.unko-st:last-child::before { display: none; }
+.unko-st-dot {
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--velvet-2);
+  border: 3px solid var(--telop);
+}
+.unko-st.is-current .unko-st-dot { background: var(--telop); box-shadow: 0 0 0 4px rgba(123, 230, 238, .25); }
+.unko-st p { margin: 0; }
+.unko-st-name { font-family: var(--font-display); font-size: 1rem; line-height: 1.4; }
+.unko-st-yomi { margin-left: 8px; font-family: var(--font-body); font-size: 0.72rem; color: var(--mute); }
+.unko-st-pref { font-size: 0.75rem; color: var(--mute); }
+.unko-st.is-current .unko-st-pref { color: var(--telop); }
+.unko-st-songs { margin: 4px 0 0; padding: 0; list-style: none; font-size: 0.85rem; }
+.unko-st-songs li::before { content: '♪ '; color: var(--amber); }
+.unko-score { margin-left: 6px; font-size: 0.75rem; font-weight: 700; color: var(--amber); }
+.unko-local { margin-top: 6px; }
+
+/* 終着駅カード（きっぷの延長） */
+.terminal {
+  position: relative;
+  margin-top: 16px;
+  padding: 16px 18px;
+  color: #3A2A12;
+  background:
+    radial-gradient(circle at 0 50%, var(--velvet-2) 0 10px, transparent 11px),
+    radial-gradient(circle at 100% 50%, var(--velvet-2) 0 10px, transparent 11px),
+    #F3E3B8;
+  border-radius: 10px;
+  animation: ticket-in .45s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.terminal p { margin: 0; }
+.terminal-head { font-size: 0.8rem; font-weight: 700; padding-bottom: 6px; border-bottom: 2px dashed rgba(58, 42, 18, .35); }
+.terminal-title { margin-top: 8px !important; font-family: var(--font-display); font-size: 1.35rem; line-height: 1.35; color: #8A2A4E; overflow-wrap: anywhere; }
+.terminal-route { margin-top: 4px !important; font-size: 0.85rem; font-weight: 700; overflow-wrap: anywhere; }
+.terminal-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; margin: 10px 0 0; }
+.terminal-stats dt { font-size: 0.7rem; color: #8A4B12; }
+.terminal-stats dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.terminal-line { margin-top: 10px !important; font-size: 0.9rem; }
+.terminal-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.terminal .btn-ghost { color: #3A2A12; border-color: rgba(58, 42, 18, .4); }
+
+/* スタンプ帳 */
+.stamp-wrap { margin-top: 14px; }
+.stamp-wrap summary { cursor: pointer; font-weight: 700; }
+.stamp-count { margin-left: 6px; font-size: 0.8rem; color: var(--mute); font-weight: 400; }
+.stamp-note { margin: 6px 0 0; font-size: 0.78rem; color: var(--mute); }
+.stamp-book { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.stamp {
+  position: relative;
+  padding: 8px 12px 8px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(246, 234, 219, 0.05);
+  border-left: 4px solid var(--telop);
+}
+.stamp p { margin: 0; }
+.stamp-date { font-size: 0.72rem; color: var(--mute); }
+.stamp-title { font-family: var(--font-display); font-size: 0.98rem; line-height: 1.4; }
+.stamp-route { font-size: 0.8rem; overflow-wrap: anywhere; }
+.stamp-meta { font-size: 0.75rem; color: var(--amber); font-weight: 700; }
+
+/* 運行中は「行こう！」ボタンを少しだけ控えめに（駅名標と重ならないよう） */
+body.is-unko .fab-go { opacity: .92; }
+
+@media (max-width: 640px) {
+  .cab-hud { top: 6px; left: 6px; padding: 4px 8px; }
+  .cab-mode { font-size: 0.68rem; }
+  .cab-place { display: none; }
+  .unko-stats { grid-template-columns: repeat(2, 1fr); }
+  .terminal-stats { grid-template-columns: repeat(2, 1fr); }
+  .eki-sign.is-compact .eki-board { width: 150px; }
+  .eki-sign.is-compact .eki-name { font-size: 1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eki-board, .eki-sign { transition: none; }
+  .cab-flash.is-pop, .eki-badge, .terminal, .cab-hud.is-tunnel { animation: none; }
+}
+/* 運行中はナビの字幕をメーターの右側から */
+body.is-unko .telop { left: 140px; right: 2%; }
+@media (max-width: 640px) { body.is-unko .telop { left: 92px; } }
